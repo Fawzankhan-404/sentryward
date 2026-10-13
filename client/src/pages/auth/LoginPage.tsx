@@ -10,12 +10,17 @@ import { useAuth } from "@/features/auth/useAuth"
 import { TextField } from "@/features/auth/TextField"
 import { applyServerErrors } from "@/features/auth/applyServerErrors"
 import { loginSchema, type LoginInput } from "@/features/auth/schemas"
+import { useRegistration } from "@/features/auth/registration"
 
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? "/home"
+  const { data: registration } = useRegistration()
+  // Only offer sign-up when /register would show the form: invitees arrive via
+  // their invite link, and hiding it until the mode is known avoids a flash.
+  const canSignUp = registration && (registration.firstUser || registration.mode === "open")
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -61,9 +66,11 @@ export function LoginPage() {
                   {form.formState.isSubmitting && <Loader2 className="animate-spin" />}
                   Log in
                 </Button>
-                <FieldDescription className="text-center">
-                  Don&apos;t have an account? <Link to="/register">Sign up</Link>
-                </FieldDescription>
+                {canSignUp && (
+                  <FieldDescription className="text-center">
+                    Don&apos;t have an account? <Link to="/register">Sign up</Link>
+                  </FieldDescription>
+                )}
               </Field>
             </FieldGroup>
           </form>

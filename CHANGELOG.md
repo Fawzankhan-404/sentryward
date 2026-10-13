@@ -15,7 +15,8 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
   **Users** page, promote or demote other admins, and create instance invites.
   An instance always keeps at least one admin.
 - `REGISTRATION_MODE` (`open`, `invite` or `closed`) controls who can create an
-  account. The first account is always allowed.
+  account. The first account is always allowed. The login page hides its
+  sign-up link unless registration is open or the instance has no accounts.
 - Invite links that work once and expire after 7 days, optionally limited to one
   email. Tokens are stored only as hashes. With `SMTP_URL` and `MAIL_FROM` set,
   invites are emailed, and resending one rotates its link and renews its expiry.

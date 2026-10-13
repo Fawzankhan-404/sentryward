@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { screen } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { App } from "@/App"
 import { jsonResponse, mockFetch, renderWithProviders } from "@/test/renderWithProviders"
@@ -56,6 +56,29 @@ describe("registration modes", () => {
     await screen.findByRole("heading", { name: "Overview" })
     const register = fetchSpy.mock.calls.find(([url]) => String(url) === "/api/auth/register")
     expect(JSON.parse(String(register?.[1]?.body))).toMatchObject({ inviteToken: "tok123" })
+  })
+})
+
+describe("login page sign-up link", () => {
+  it.each([
+    ["open", false],
+    ["closed", true],
+  ])("is offered in %s mode (first user: %s)", async (value, firstUser) => {
+    signedOut({ "GET /api/auth/registration": mode(value, firstUser) })
+    renderWithProviders(<App />, { route: "/login" })
+
+    expect(await screen.findByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/register")
+  })
+
+  it.each(["closed", "invite"])("is hidden in %s mode", async (value) => {
+    const fetchSpy = signedOut({ "GET /api/auth/registration": mode(value) })
+    renderWithProviders(<App />, { route: "/login" })
+
+    await screen.findByText("Welcome back")
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([url]) => String(url) === "/api/auth/registration")).toBe(true))
+    // Let the registration response render before checking the link is absent.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole("link", { name: "Sign up" })).not.toBeInTheDocument()
   })
 })
 

@@ -153,6 +153,9 @@ grant access to either.
 | `invite` | Only people with an invite link. A team invite also works here, admitting the new account and placing it in that team |
 | `closed` | No new accounts; admins can still create invites, but they cannot register anyone until the mode allows it. Existing signed-in users can still accept a team invite to join a workspace |
 
+The login page only links to sign-up when registration is `open` or the instance
+has no accounts yet; invitees register from their invite link.
+
 An invite link works once and expires after 7 days. Adding an email limits the
 link to that address. When `SMTP_URL` (for example
 `smtp://user:pass@smtp.example.com:587`) and `MAIL_FROM` are set, the link is
