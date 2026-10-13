@@ -43,6 +43,16 @@ describe("workspace switching", () => {
     expect(localStorage.getItem("sentryward.workspace")).toBe(teamWorkspace.id)
   })
 
+  it("loads the create team dialog the first time it is opened", async () => {
+    mockApi({ "GET /api/reviews": { reviews: [], total: 0 } })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Switch workspace" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Create team" }))
+
+    expect(await screen.findByRole("dialog", { name: "Create a team" })).toBeInTheDocument()
+  })
+
   it("restores the remembered workspace and drops one you are no longer in", async () => {
     localStorage.setItem("sentryward.workspace", teamWorkspace.id)
     mockApi({ "GET /api/reviews": { reviews: [], total: 0 } })

@@ -1,6 +1,10 @@
 import "@testing-library/jest-dom/vitest"
 import { afterEach, vi } from "vitest"
-import { cleanup } from "@testing-library/react"
+import { cleanup, configure } from "@testing-library/react"
+
+// Pages are lazy (App.tsx); the first render of a route waits while vitest
+// transforms that page's module, which can outlast the 1s default.
+configure({ asyncUtilTimeout: 3000 })
 
 afterEach(() => {
   cleanup()

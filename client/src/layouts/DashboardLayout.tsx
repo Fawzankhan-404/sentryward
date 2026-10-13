@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import {
   Bug,
@@ -15,7 +16,9 @@ import {
   UsersRound,
 } from "lucide-react"
 import { toast } from "sonner"
+import { ChunkLoadError } from "@/components/ChunkLoadError"
 import { DensityToggle } from "@/components/density-toggle"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { ModeToggle } from "@/components/mode-toggle"
 import { UserAvatar } from "@/components/UserAvatar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -45,6 +48,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { FullPageSpinner } from "@/features/auth/FullPageSpinner"
 import { useAuth } from "@/features/auth/useAuth"
 import { WorkspaceSwitcher } from "@/features/workspaces/WorkspaceSwitcher"
 
@@ -242,8 +246,15 @@ export function DashboardLayout() {
             <ModeToggle />
           </div>
         </header>
-        {/* Remounting on a switch resets page state along with the cleared cache. */}
-        <Outlet key={workspace?.id} />
+        {/* Pages are lazy (see App.tsx); these boundaries keep the sidebar and
+            top bar up while a page's chunk loads or if it fails to. Keying the
+            error boundary on the path clears a failure once you navigate away.
+            Remounting on a switch resets page state along with the cleared cache. */}
+        <ErrorBoundary key={pathname} fallback={<ChunkLoadError className="min-h-0 flex-1 py-24" />}>
+          <Suspense fallback={<FullPageSpinner className="min-h-0 flex-1 py-24" />}>
+            <Outlet key={workspace?.id} />
+          </Suspense>
+        </ErrorBoundary>
       </SidebarInset>
     </SidebarProvider>
   )
