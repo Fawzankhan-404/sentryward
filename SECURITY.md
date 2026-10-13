@@ -2,8 +2,9 @@
 
 ## Supported versions and private reports
 
-Sentryward is alpha software. Security fixes target the latest code on `main`; there
-are no supported stable release branches yet.
+Security fixes target the latest stable release and the latest code on `main`.
+Older releases do not have maintained security branches; upgrade to the latest
+stable release to receive fixes.
 
 Use [GitHub private vulnerability reporting](https://github.com/rdlugs/sentryward/security/advisories/new)
 to report a vulnerability. Include the affected revision, reproduction steps,
