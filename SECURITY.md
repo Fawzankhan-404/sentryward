@@ -17,14 +17,22 @@ unavailable, do not publish exploit details in an issue.
 
 ## Deployment boundaries
 
-The supplied Docker Compose setup is for development. It runs development
-servers, mounts source, exposes PostgreSQL, and uses example database credentials.
-Do not expose it as a production service or rely on it for untrusted multi-user
-hosting. Public registration is currently available without an invitation gate.
+`docker-compose.yml` is for development. It runs development servers, mounts
+source, exposes PostgreSQL, and uses example database credentials. Do not expose
+it as a production service.
 
-`NODE_ENV=production` enables secure authentication cookies and existing
-HTTPS/public-address checks for self-hosted forge hosts. It does not change the
-Docker serving commands or supply HTTPS. These forge checks do not prevent DNS
+The supported way to host an instance is the production image with
+`docker-compose.prod.yml` (README, "Deploying"). It runs without development
+servers or source mounts, does not publish the database port, binds the API to
+the host's loopback interface, and defaults `REGISTRATION_MODE` to `invite`. It
+does not supply HTTPS: the operator runs the TLS-terminating reverse proxy, and
+remains responsible for host hardening, backups, protecting `ENCRYPTION_KEY`,
+and keeping the image up to date. Set `TRUST_PROXY` to the number of proxies
+actually in front of the API: a value that is too high lets clients spoof the
+address that rate limits are keyed on.
+
+`NODE_ENV=production` (the image default) enables secure authentication cookies
+and existing HTTPS/public-address checks for self-hosted forge hosts. These forge checks do not prevent DNS
 rebinding, and custom model endpoints are a separate trust boundary. Restrict
 network egress and access to trusted operators when evaluating deployments.
 

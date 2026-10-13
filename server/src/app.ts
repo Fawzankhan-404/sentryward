@@ -14,10 +14,15 @@ import { settingsRouter } from "./routes/settings.routes.ts";
 import { usersRouter } from "./routes/users.routes.ts";
 import { webhooksRouter } from "./routes/webhooks.routes.ts";
 import { workspacesRouter } from "./routes/workspaces.routes.ts";
+import { clientApp } from "./middleware/clientApp.ts";
 import { errorHandler } from "./middleware/errorHandler.ts";
 import { WORKSPACE_HEADER } from "./services/workspaces.ts";
 
 export const app = express();
+
+if (env.TRUST_PROXY !== undefined) {
+  app.set("trust proxy", env.TRUST_PROXY);
+}
 
 app.use(helmet());
 app.use(
@@ -46,6 +51,10 @@ app.use("/api/findings", findingsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/workspaces", workspacesRouter);
+
+if (env.STATIC_DIR) {
+  app.use(clientApp(env.STATIC_DIR));
+}
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });
