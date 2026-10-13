@@ -73,6 +73,9 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 - Adding a team member by email, and the add-member picker, show team admins
   which emails have accounts on the instance. This is deliberate, so existing
   users can be added in one step.
+- KaTeX, which Mermaid diagrams use for math, is pinned to 0.18.x for
+  [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
+  Mermaid still requires 0.16.x, so the client overrides it.
 
 ## [0.1.0-alpha.2] - 2026-10-05
 
