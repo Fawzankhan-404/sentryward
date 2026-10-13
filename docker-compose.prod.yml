@@ -71,8 +71,20 @@ services:
     image: ghcr.io/rdlugs/sentryward:${SENTRYWARD_VERSION:-latest}
     restart: unless-stopped
     command: ["node", "--import", "tsx", "src/worker/index.ts"]
+    # The worker finishes in-flight reviews on SIGTERM. Compose's default 10s
+    # would kill them mid-run, leaving them stuck until stale-lock recovery
+    # (WORKER_LOCK_TIMEOUT_MS) retries them. Waiting longer than the lock
+    # timeout gains nothing, since the job is recovered by then anyway.
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD:-15m}
     environment:
       <<: *app-environment
+      # Defaults mirror server/src/config/env.ts; an empty value would fail
+      # its positive-number validation and stop the worker from starting.
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-2000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_USER_CONCURRENCY: ${WORKER_USER_CONCURRENCY:-2}
+      WORKER_LOCK_TIMEOUT_MS: ${WORKER_LOCK_TIMEOUT_MS:-900000}
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-3}
     depends_on:
       db:
         condition: service_healthy

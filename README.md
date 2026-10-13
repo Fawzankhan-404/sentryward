@@ -268,7 +268,10 @@ before `up`.
   before sharing the URL.
 - **Upgrades:** back up the database, change `SENTRYWARD_VERSION`, then run `pull`
   and `up -d` with the same `-f` and `--env-file` flags. The server applies
-  migrations before it reports healthy, and the worker starts after it.
+  migrations before it reports healthy, and the worker starts after it. The old
+  worker finishes its in-flight reviews before exiting, and Compose waits up to
+  `WORKER_STOP_GRACE_PERIOD` (default `15m`) for it, so an upgrade can pause while
+  reviews complete; `stop -t <seconds>` overrides the wait.
 - **Backups:** the `pgdata` volume holds everything (for example
   `docker compose -f docker-compose.prod.yml exec db pg_dump -U sentryward sentryward`).
   Back up `ENCRYPTION_KEY` separately and keep it stable: stored forge tokens and

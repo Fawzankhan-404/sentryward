@@ -33,7 +33,9 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
   runs the worker; `docker-compose.prod.yml` with an unpublished database and a
   loopback-only API port for a TLS reverse proxy; `.env.production.example`; and
   a README "Deploying" section. Release tags publish the image to GHCR for
-  `linux/amd64` and `linux/arm64`.
+  `linux/amd64` and `linux/arm64`. The worker takes the `WORKER_*` settings
+  from the env file and gets up to `WORKER_STOP_GRACE_PERIOD` (15 minutes by
+  default) to finish in-flight reviews when stopped or upgraded.
 - `STATIC_DIR` serves a built client from the API, and `TRUST_PROXY` sets
   Express's trusted proxy hops so rate limits see client addresses behind a
   reverse proxy.
