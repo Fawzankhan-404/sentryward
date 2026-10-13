@@ -1,6 +1,6 @@
 # Contributing to Sentryward
 
-Sentryward is an alpha project. Start with a focused bug report or feature proposal
+Sentryward is pre-1.0. Start with a focused bug report or feature proposal
 before substantial changes. For questions and ideas, start a
 [discussion](https://github.com/rdlugs/sentryward/discussions) explaining what you
 tried and what you need. Follow the [code of conduct](CODE_OF_CONDUCT.md).
@@ -58,5 +58,5 @@ GitHub Actions repeats the required checks in Docker for pull requests and pushe
 to `main`, using disposable development credentials. A passing client build
 verifies the frontend output; it does not certify a production deployment.
 
-Maintainers can use the [alpha release checklist](docs/RELEASE_CHECKLIST.md) for
+Maintainers can use the [release checklist](docs/RELEASE_CHECKLIST.md) for
 verification results, audit findings, and the remaining publication steps.

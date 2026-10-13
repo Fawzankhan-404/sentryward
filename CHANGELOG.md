@@ -8,6 +8,11 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-13
+
+First stable release. Sentryward remains pre-1.0; minor releases may include
+breaking changes. AI findings still need human verification.
+
 ### Added
 
 - Instance admins. The first account on an empty install becomes the admin (on
@@ -43,6 +48,9 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Changed
 
+- Dashboard routes load on demand to reduce the initial JavaScript bundle. A
+  failed route download offers a reload so the dashboard can recover after an
+  upgrade.
 - **Bammy is now Sentryward**, with a new logo. Every identifier changed with the
   name and there are no fallbacks:
   - the repository config file is `.sentryward.yaml` (or `.sentryward.yml`);
@@ -148,6 +156,7 @@ boundaries.
 - The Docker Compose setup is for development, not public production hosting.
 - Registration is open, with no invitation gate.
 
-[Unreleased]: https://github.com/rdlugs/sentryward/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/rdlugs/sentryward/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rdlugs/sentryward/compare/v0.1.0-alpha.2...v0.1.0
 [0.1.0-alpha.2]: https://github.com/rdlugs/sentryward/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/rdlugs/sentryward/releases/tag/v0.1.0-alpha.1

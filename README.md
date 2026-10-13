@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/rdlugs/sentryward/actions/workflows/ci.yml"><img src="https://github.com/rdlugs/sentryward/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/rdlugs/sentryward/releases"><img src="https://img.shields.io/github/v/release/rdlugs/sentryward?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="https://github.com/rdlugs/sentryward/releases"><img src="https://img.shields.io/github/v/release/rdlugs/sentryward?label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -29,7 +29,7 @@ automatic reviews with inline findings, walkthroughs, and commit statuses. The
 dashboard tracks reviews and findings across runs.
 
 > [!WARNING]
-> **Sentryward is alpha software.** Features and configuration may evolve. AI findings
+> Sentryward is pre-1.0: minor releases may include breaking changes. AI findings
 > need human verification and can miss problems or report false positives.
 > `docker-compose.yml` is for development; to host an instance, see [Deploying](#deploying).
 
@@ -246,8 +246,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` on each release tag.
-`SENTRYWARD_VERSION` picks the tag (for example `0.1.0-alpha.3`). `latest` follows
-the newest stable release only, so pin a version while Sentryward is pre-release.
+`SENTRYWARD_VERSION` picks the tag (for example `0.1.0`). `latest` follows
+the newest stable release only; pin a version for controlled upgrades.
 To build from source instead, set `SENTRYWARD_VERSION` to a local name and run
 `docker compose -f docker-compose.prod.yml --env-file .env.production build server`
 before `up`.

@@ -1,4 +1,67 @@
-# Alpha release handoff
+# Release handoff
+
+## 0.1.0 preparation (2026-10-13)
+
+Release metadata is prepared for `v0.1.0`. Both package manifests and
+lockfile root entries use `0.1.0`; the production env example pins this
+version for controlled upgrades. This is the first stable release; the image
+workflow publishes both `0.1.0` and `latest`. The changelog contains the release
+notes and comparison links.
+
+### Verification
+
+- Server: 559 tests pass, type check passes, and Prisma schema validation passes.
+- Client: type check, lint and production build pass. Lint reports two existing
+  Fast Refresh warnings in `AuthProvider.tsx`; the build reports one existing
+  diagram chunk above 500 kB.
+- Client: all 243 tests pass with `docker compose exec -T client npm test --
+  --maxWorkers=2`. The default worker count produced timing failures (five on
+  the first run, one five-second timeout on the second) on this host; limiting
+  workers resolved them without changing application code or test timeouts.
+- Dependency audits: server reports zero findings with and without dev
+  dependencies; client reports zero runtime findings and the same seven high
+  findings in shadcn development tooling previously accepted for alpha (see the
+  historical audit below). These remain disclosed for the stable release.
+  Installed KaTeX is `0.18.10`, covered by the Mermaid override.
+- Before changing release metadata to stable `0.1.0`, the production image built
+  from locked dependencies on this host using `0.1.0-alpha.3` metadata. A separate
+  Compose project with a fresh database applies migrations and starts the API
+  and worker. API health, dashboard HTML, a deep SPA route, unknown API 404, and
+  non-root runtime checks pass. The API binds to loopback and the database has
+  no published host port. The disposable production services, volume and env
+  file were removed after verification.
+- Hosted CI passes for source commit `e0d3ae37389291a6f0b415864a5669f2331b699d`
+  ([run 38351600077](https://github.com/rdlugs/sentryward/actions/runs/38351600077)).
+  CodeQL also passes for that commit. Hosted CI must also pass on the release
+  preparation commit before tagging.
+- No browser walkthrough, live forge/model review, public deployment, new secret
+  scan, or local arm64 build was performed for this preparation. The release
+  workflow builds both amd64 and arm64 images when the tag is pushed.
+
+### Upgrade notes
+
+- Back up the database and encryption key before upgrading. Preserve the key.
+- This release renames Bammy identifiers with no compatibility fallbacks. Follow
+  the changelog's config filename, command, status, cookie and volume notes.
+  Preserve an existing database explicitly when switching Compose project names;
+  the new project otherwise creates an empty volume.
+- Existing user data moves into personal workspaces through startup migrations.
+  The oldest existing account becomes the instance admin.
+- Use the production Compose file behind an HTTPS reverse proxy for hosting.
+  The development Compose file remains a development setup.
+
+### Publication steps
+
+- [x] Authorize staging and committing the preparation changes.
+- [ ] Push the approved commit and obtain passing hosted CI for it.
+- [ ] Create and push `v0.1.0` on that verified commit.
+- [ ] Verify both architecture images are published to GHCR, and make the package
+  accessible to intended users before announcing the production install command.
+- [ ] Publish a stable GitHub release (not a prerelease) using the `0.1.0`
+  changelog section, including upgrade notes and the pre-1.0/AI limitations.
+
+The following sections record the first alpha's checks and accepted audit
+findings. They are historical evidence, not checks rerun for 0.1.0.
 
 ## Verification completed on 2026-10-05
 
