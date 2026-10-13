@@ -1,19 +1,6 @@
-import { useState } from "react"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
+import { lazy, Suspense, useState } from "react"
 import { useNavigate } from "react-router"
-import { Check, ChevronsUpDown, Loader2, Plus, User, Users } from "lucide-react"
-import { z } from "zod"
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Check, ChevronsUpDown, Plus, User, Users } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,70 +10,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
-import { applyServerErrors } from "@/features/auth/applyServerErrors"
-import { TextField } from "@/features/auth/TextField"
 import { useAuth } from "@/features/auth/useAuth"
-import { useCreateWorkspace } from "./api"
 
-const nameSchema = z.object({ name: z.string().trim().min(1, "Name is required").max(100) })
-type NameInput = z.infer<typeof nameSchema>
-
-function CreateTeamDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { switchWorkspace } = useAuth()
-  const navigate = useNavigate()
-  const create = useCreateWorkspace()
-  const form = useForm<NameInput>({ resolver: zodResolver(nameSchema), defaultValues: { name: "" } })
-
-  async function onSubmit({ name }: NameInput) {
-    try {
-      const workspace = await create.mutateAsync(name)
-      onOpenChange(false)
-      form.reset()
-      switchWorkspace(workspace.id)
-      navigate("/workspace")
-    } catch (error) {
-      applyServerErrors(error, form.setError)
-    }
-  }
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next)
-        if (!next) form.reset()
-      }}
-    >
-      <DialogContent>
-        <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
-          <DialogHeader>
-            <DialogTitle>Create a team</DialogTitle>
-            <DialogDescription>
-              A team has its own connections, repositories, reviews and keys, shared with the people you invite.
-            </DialogDescription>
-          </DialogHeader>
-          <TextField control={form.control} name="name" label="Name" autoComplete="off" placeholder="Acme" />
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting && <Loader2 className="animate-spin" />}
-              Create team
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
+// The switcher is part of the dashboard shell, so it is in the entry chunk; the
+// dialog's form (zod, react-hook-form) loads the first time it is opened.
+const CreateTeamDialog = lazy(() => import("./CreateTeamDialog").then((m) => ({ default: m.CreateTeamDialog })))
 
 export function WorkspaceSwitcher() {
   const { workspaces, workspace, switchWorkspace } = useAuth()
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
+  // Stays mounted once loaded so closing still animates.
+  const [dialogLoaded, setDialogLoaded] = useState(false)
 
   if (!workspace) return null
   const Icon = workspace.personal ? User : Users
@@ -129,13 +64,22 @@ export function WorkspaceSwitcher() {
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => setCreating(true)}>
+            <DropdownMenuItem
+              onSelect={() => {
+                setDialogLoaded(true)
+                setCreating(true)
+              }}
+            >
               <Plus />
               Create team
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <CreateTeamDialog open={creating} onOpenChange={setCreating} />
+        {dialogLoaded && (
+          <Suspense fallback={null}>
+            <CreateTeamDialog open={creating} onOpenChange={setCreating} />
+          </Suspense>
+        )}
       </SidebarMenuItem>
     </SidebarMenu>
   )

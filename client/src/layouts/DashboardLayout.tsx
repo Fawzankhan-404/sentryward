@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import {
   Bug,
@@ -45,6 +46,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { FullPageSpinner } from "@/features/auth/FullPageSpinner"
 import { useAuth } from "@/features/auth/useAuth"
 import { WorkspaceSwitcher } from "@/features/workspaces/WorkspaceSwitcher"
 
@@ -242,8 +244,12 @@ export function DashboardLayout() {
             <ModeToggle />
           </div>
         </header>
-        {/* Remounting on a switch resets page state along with the cleared cache. */}
-        <Outlet key={workspace?.id} />
+        {/* Pages are lazy (see App.tsx); a boundary here keeps the sidebar and
+            top bar up while a page's chunk loads. Remounting on a switch resets
+            page state along with the cleared cache. */}
+        <Suspense fallback={<FullPageSpinner className="min-h-0 flex-1 py-24" />}>
+          <Outlet key={workspace?.id} />
+        </Suspense>
       </SidebarInset>
     </SidebarProvider>
   )
