@@ -30,8 +30,8 @@ dashboard tracks reviews and findings across runs.
 
 > [!WARNING]
 > **Sentryward is alpha software.** Features and configuration may evolve. AI findings
-> need human verification and can miss problems or report false positives. The
-> included Docker setup is for development, not public production hosting.
+> need human verification and can miss problems or report false positives.
+> `docker-compose.yml` is for development; to host an instance, see [Deploying](#deploying).
 
 ## Contents
 
@@ -39,6 +39,7 @@ dashboard tracks reviews and findings across runs.
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [users and invites](#users-and-invites), [workspaces and teams](#workspaces-and-teams), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
+- [Deploying](#deploying)
 - [Forge connections](#forge-connections), [publishing](#publishing-to-the-forge), [automatic reviews](#automatic-reviews)
 - [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.sentryward.yaml`](#sentrywardyaml-reference)
 - [API](#api)
@@ -131,8 +132,8 @@ docker compose up -d server worker
 `test` is reserved for automated tests; the server test script sets it explicitly.
 Other values fail startup validation. `production` does not switch Docker
 commands, disable watchers, build/serve the frontend, or provide HTTPS. The client
-still runs Vite's development server. Production deployment infrastructure is
-deferred; do not expose this Compose setup publicly.
+still runs Vite's development server, so do not expose this Compose setup publicly;
+use the production image instead (see [Deploying](#deploying)).
 
 ### Users and invites
 
@@ -226,6 +227,57 @@ review or evidence of model accuracy.
   or publishing errors. Never post credentials or private code in an issue.
 
 </details>
+
+## Deploying
+
+The production setup is one image, `ghcr.io/rdlugs/sentryward`, that runs the API,
+serves the built dashboard from the same origin, and runs the review worker with
+a different command. `docker-compose.prod.yml` runs it with PostgreSQL. It has no
+source mounts or dev dependencies, and does not publish the database port. TLS is
+left to a reverse proxy you run in front of it.
+
+```sh
+cp .env.production.example .env.production
+# fill in POSTGRES_PASSWORD, JWT_SECRET, ENCRYPTION_KEY and your public URL
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+Images are published for `linux/amd64` and `linux/arm64` on each release tag.
+`SENTRYWARD_VERSION` picks the tag (for example `0.1.0-alpha.3`). `latest` follows
+the newest stable release only, so pin a version while Sentryward is pre-release.
+To build from source instead, set `SENTRYWARD_VERSION` to a local name and run
+`docker compose -f docker-compose.prod.yml --env-file .env.production build server`
+before `up`.
+
+- **Public URL:** set `CLIENT_ORIGIN` and `API_PUBLIC_URL` to the same `https://`
+  URL. The GitHub App's setup URL becomes `<url>/api/connections/github/callback` and
+  its webhook URL `<url>/api/webhooks/github`; GitLab webhooks use it automatically.
+- **Reverse proxy:** the API listens on `127.0.0.1:4000` on the host (`API_BIND`,
+  `API_HOST_PORT`). `TRUST_PROXY` (default `1`) is the number of proxies in front,
+  so rate limits see client addresses; set it to match your setup. A minimal Caddy
+  config, which also obtains the certificate:
+
+  ```
+  sentryward.example.com {
+      reverse_proxy 127.0.0.1:4000
+  }
+  ```
+
+- **Registration:** the production example defaults `REGISTRATION_MODE` to `invite`.
+  The first account still registers freely and becomes the admin, so create it
+  before sharing the URL.
+- **Upgrades:** back up the database, change `SENTRYWARD_VERSION`, then run `pull`
+  and `up -d` with the same `-f` and `--env-file` flags. The server applies
+  migrations before it reports healthy, and the worker starts after it.
+- **Backups:** the `pgdata` volume holds everything (for example
+  `docker compose -f docker-compose.prod.yml exec db pg_dump -U sentryward sentryward`).
+  Back up `ENCRYPTION_KEY` separately and keep it stable: stored forge tokens and
+  model keys cannot be decrypted without it.
+- **Model endpoints on the host** (such as Ollama): the production file does not add
+  `host.docker.internal`. Add an `extra_hosts` entry to the worker and server if you
+  need it.
+
+Read [SECURITY.md](SECURITY.md) before exposing an instance.
 
 ## Forge connections
 

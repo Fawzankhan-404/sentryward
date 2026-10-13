@@ -1,0 +1,84 @@
+# Production deployment. See "Deploying" in the README.
+#   cp .env.production.example .env.production   # then fill it in
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# TLS is not handled here: put a reverse proxy in front of the API port.
+name: sentryward-prod
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-sentryward}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sentryward}
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
+  # The public HTTPS URL of this instance; the API serves the dashboard too.
+  CLIENT_ORIGIN: ${CLIENT_ORIGIN:?set CLIENT_ORIGIN}
+  API_PUBLIC_URL: ${API_PUBLIC_URL:?set API_PUBLIC_URL}
+  GITHUB_HOST: ${GITHUB_HOST:-github.com}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+  GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentryward}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-sentryward}
+    # No published port: only the server and worker reach the database.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: ghcr.io/rdlugs/sentryward:${SENTRYWARD_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      # Hops of reverse proxy in front of the API; 1 for a single proxy.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-invite}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+    # Loopback only, for a reverse proxy on the same host. Set API_BIND to
+    # 0.0.0.0 only if the proxy runs elsewhere and the port is firewalled.
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_HOST_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    image: ghcr.io/rdlugs/sentryward:${SENTRYWARD_VERSION:-latest}
+    restart: unless-stopped
+    command: ["node", "--import", "tsx", "src/worker/index.ts"]
+    environment:
+      <<: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      # The server applies migrations before it reports healthy.
+      server:
+        condition: service_healthy
+
+volumes:
+  pgdata:

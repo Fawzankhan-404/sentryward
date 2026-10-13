@@ -45,6 +45,18 @@ const envSchema = z.object({
   // it invites are still created and their link is shown to copy.
   SMTP_URL: optionalString(z.string().url()),
   MAIL_FROM: optionalString(z.string()),
+  // The built client, served by the API in the production image so the
+  // dashboard and API share one origin. Unset in development, where Vite serves it.
+  STATIC_DIR: optionalString(z.string()),
+  // Express "trust proxy": a hop count, or true/false. Behind a reverse proxy
+  // req.ip is otherwise the proxy's address, so IP rate limits would put every
+  // client in one bucket.
+  TRUST_PROXY: optionalString(
+    z.union([
+      z.enum(["true", "false"]).transform((value) => value === "true"),
+      z.coerce.number().int().nonnegative(),
+    ]),
+  ),
 });
 
 const parsedEnvSchema = envSchema.refine((data) => !data.SMTP_URL || data.MAIL_FROM, {

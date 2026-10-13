@@ -1,0 +1,8 @@
+# Build context for docker/Dockerfile (the repository root). The development
+# images build from server/ and client/ and use the .dockerignore files there.
+**/node_modules
+**/dist
+server/src/generated
+**/.env
+**/.env.*
+.git
