@@ -1,6 +1,8 @@
 import { lazy, Suspense, useState } from "react"
 import { useNavigate } from "react-router"
 import { Check, ChevronsUpDown, Plus, User, Users } from "lucide-react"
+import { toast } from "sonner"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 import { useAuth } from "@/features/auth/useAuth"
+import { reloadPage } from "@/lib/reloadPage"
 
 // The switcher is part of the dashboard shell, so it is in the entry chunk; the
 // dialog's form (zod, react-hook-form) loads the first time it is opened.
@@ -76,9 +79,20 @@ export function WorkspaceSwitcher() {
           </DropdownMenuContent>
         </DropdownMenu>
         {dialogLoaded && (
-          <Suspense fallback={null}>
-            <CreateTeamDialog open={creating} onOpenChange={setCreating} />
-          </Suspense>
+          // A failed chunk must not take down the sidebar. Unmounting the
+          // boundary lets the next click try again (and toast again).
+          <ErrorBoundary
+            fallback={null}
+            onError={() => {
+              setCreating(false)
+              setDialogLoaded(false)
+              toast.error("Could not open the create team dialog", { action: { label: "Reload", onClick: reloadPage } })
+            }}
+          >
+            <Suspense fallback={null}>
+              <CreateTeamDialog open={creating} onOpenChange={setCreating} />
+            </Suspense>
+          </ErrorBoundary>
         )}
       </SidebarMenuItem>
     </SidebarMenu>

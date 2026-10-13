@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react"
 import { Navigate, Route, Routes, useLocation } from "react-router"
+import { ChunkLoadError } from "@/components/ChunkLoadError"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute"
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { FullPageSpinner } from "@/features/auth/FullPageSpinner"
@@ -30,34 +32,38 @@ function ConnectionsRedirect() {
 }
 
 export function App() {
+  // The outer boundary covers the public pages; DashboardLayout has its own so a
+  // failed page there keeps the sidebar.
   return (
-    <Suspense fallback={<FullPageSpinner />}>
-      <Routes>
-        <Route element={<PublicOnlyRoute />}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-        </Route>
-        {/* Reachable signed in or out: it explains what to do in either case. */}
-        <Route path="/invite/:token" element={<InvitePage />} />
-        <Route element={<ProtectedRoute />}>
-          <Route element={<DashboardLayout />}>
-            <Route path="/home" element={<HomePage />} />
-            {/* Old bookmarks and links. */}
-            <Route path="/dashboard" element={<Navigate to="/home" replace />} />
-            <Route path="/reviews" element={<ReviewsPage />} />
-            <Route path="/reviews/:id" element={<ReviewDetailPage />} />
-            <Route path="/findings" element={<FindingsPage />} />
-            <Route path="/repositories" element={<RepositoriesPage />} />
-            <Route path="/connections" element={<ConnectionsRedirect />} />
-            <Route path="/configuration" element={<ConfigurationPage />} />
-            <Route path="/llm-connections" element={<LlmConnectionsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/workspace" element={<WorkspacePage />} />
-            <Route path="/admin/users" element={<AdminUsersPage />} />
+    <ErrorBoundary fallback={<ChunkLoadError className="min-h-svh" />}>
+      <Suspense fallback={<FullPageSpinner />}>
+        <Routes>
+          <Route element={<PublicOnlyRoute />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
           </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/home" replace />} />
-      </Routes>
-    </Suspense>
+          {/* Reachable signed in or out: it explains what to do in either case. */}
+          <Route path="/invite/:token" element={<InvitePage />} />
+          <Route element={<ProtectedRoute />}>
+            <Route element={<DashboardLayout />}>
+              <Route path="/home" element={<HomePage />} />
+              {/* Old bookmarks and links. */}
+              <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+              <Route path="/reviews" element={<ReviewsPage />} />
+              <Route path="/reviews/:id" element={<ReviewDetailPage />} />
+              <Route path="/findings" element={<FindingsPage />} />
+              <Route path="/repositories" element={<RepositoriesPage />} />
+              <Route path="/connections" element={<ConnectionsRedirect />} />
+              <Route path="/configuration" element={<ConfigurationPage />} />
+              <Route path="/llm-connections" element={<LlmConnectionsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/workspace" element={<WorkspacePage />} />
+              <Route path="/admin/users" element={<AdminUsersPage />} />
+            </Route>
+          </Route>
+          <Route path="*" element={<Navigate to="/home" replace />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   )
 }
