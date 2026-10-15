@@ -263,4 +263,16 @@ describe("evaluate", () => {
     expect(run.cases[0]).not.toHaveProperty("score");
     expect(run.totals).toMatchObject({ errored: 1, scored: 0, precision: null, recall: null });
   });
+
+  it("leaves the cost unknown when a review throws", async () => {
+    const { generate } = fakeModel({ code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+    const broken = { ...sqlCase, changeSet: null as never };
+
+    const run = await evaluate([broken, sqlCase], generate, { model: "anthropic/claude-sonnet-5-5", match: DEFAULT_MATCH_OPTIONS, concurrency: 1 });
+
+    expect(run.cases[0]).toMatchObject({ status: "error", costUsd: null });
+    expect(run.cases[1]?.costUsd).toBeGreaterThan(0);
+    // One unknown makes the total unknown rather than a partial sum.
+    expect(run.totals.costUsd).toBeNull();
+  });
 });

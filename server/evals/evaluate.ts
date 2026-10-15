@@ -87,13 +87,15 @@ export async function evaluateCase(evalCase: EvalCase, generate: Generate, optio
       costUsd,
     };
   } catch (err) {
+    // The throw may have come after billable calls, whose usage is lost with
+    // the result, so the cost is unknown rather than zero.
     return {
       ...base,
       status: "error",
       error: err instanceof Error ? err.message : String(err),
       warnings: [],
       usage: summarizeUsage([]),
-      costUsd: 0,
+      costUsd: null,
     };
   }
 }
