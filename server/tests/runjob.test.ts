@@ -7,10 +7,47 @@ import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
 import { runJob, skipReason, walkthroughEnabled, type RunJobDeps } from "../src/worker/runJob.ts";
 import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
+import { fingerprint } from "../src/review/core/fingerprint.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
 import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
 
 let repositoryId: string;
+
+// The fingerprint the default modelFinding() gets after validation (its kind is
+// not demoted, as it carries real evidence), used to seed a prior dismissal.
+const DEFAULT_FINGERPRINT = fingerprint({
+  file: "src/app.ts",
+  category: "bug",
+  kind: "potential_issue",
+  title: "b overflows for large a",
+});
+
+async function seedIgnored(overrides: {
+  number: number;
+  fingerprint: string;
+  title: string;
+  ignoreReason: "false_positive" | "intentional" | "fix_later" | "not_specified";
+  ignoreNote?: string;
+}) {
+  await prisma.finding.create({
+    data: {
+      repositoryId,
+      number: overrides.number,
+      fingerprint: overrides.fingerprint,
+      state: "ignored",
+      ignoredAt: new Date(),
+      ignoreReason: overrides.ignoreReason,
+      ignoreNote: overrides.ignoreNote,
+      title: overrides.title,
+      file: "src/app.ts",
+      startLine: 11,
+      severity: "major",
+      category: "bug",
+      kind: "potential_issue",
+      changeTitle: "t",
+    },
+  });
+}
 
 beforeEach(async () => {
   await prisma.workspace.deleteMany();
@@ -163,6 +200,53 @@ describe("runJob", () => {
     const findings = await prisma.finding.findMany({ where: { repositoryId, number: 42 } });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ state: "open", author: "alice", lastJobId: job.id });
+  });
+
+  it("never reposts a finding this team dismissed on the same change", async () => {
+    const job = await claimedJob();
+    await seedIgnored({ number: 42, fingerprint: DEFAULT_FINGERPRINT, title: "b overflows for large a", ignoreReason: "false_positive" });
+    const { runDeps, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(published.inline).toHaveLength(0);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    const result = stored.result as { findings: unknown[]; validation: { dropped: Record<string, number> } };
+    expect(result.findings).toHaveLength(0);
+    expect(result.validation.dropped.previously_ignored).toBe(1);
+  });
+
+  it("lists recent repo dismissals in the review prompt, excluding fix_later", async () => {
+    const job = await claimedJob();
+    await seedIgnored({ number: 7, fingerprint: "aaaa000000000000", title: "nullable config read", ignoreReason: "false_positive", ignoreNote: "config is always set by the loader" });
+    await seedIgnored({ number: 8, fingerprint: "bbbb000000000000", title: "intentional global mutation", ignoreReason: "intentional" });
+    await seedIgnored({ number: 9, fingerprint: "cccc000000000000", title: "fix this later please", ignoreReason: "fix_later" });
+    const { runDeps, model } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    const review = model.requests.find((r) => r.schemaName === "code_review");
+    expect(review?.prompt).toContain("Previously rejected by this team");
+    expect(review?.prompt).toContain("nullable config read");
+    expect(review?.prompt).toContain("config is always set by the loader");
+    expect(review?.prompt).toContain("intentional global mutation");
+    expect(review?.prompt).not.toContain("fix this later please");
+  });
+
+  it("reports a dismissed finding again when suppression is turned off", async () => {
+    const job = await claimedJob();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { review: { blockOn: "major", suppressIgnored: false } } },
+    });
+    await seedIgnored({ number: 42, fingerprint: DEFAULT_FINGERPRINT, title: "b overflows for large a", ignoreReason: "false_positive" });
+    const { runDeps, model, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(published.inline).toHaveLength(1);
+    const review = model.requests.find((r) => r.schemaName === "code_review");
+    expect(review?.prompt).not.toContain("Previously rejected by this team");
   });
 
   it("stores a failed review as failed with its errors", async () => {

@@ -379,6 +379,7 @@ review:
   max_chunks: 12
   min_confidence: 0.5
   require_evidence: true    # unproven critical/major findings are demoted
+  suppress_ignored: true    # don't re-report findings this team dismissed as false positive/intentional
   full_file: false          # allow findings on lines the change did not touch
   committable_suggestions: true
   disable_cache: false      # fetch the diff and config file fresh on every run

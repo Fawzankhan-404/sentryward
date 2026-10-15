@@ -1,5 +1,5 @@
 import type { Config } from "../config/schema.ts";
-import type { ChangeSet, LlmUsage } from "../core/models.ts";
+import type { ChangeSet, LlmUsage, RejectedFinding } from "../core/models.ts";
 import type { Chunk } from "../context/chunk.ts";
 import { reviewSystemPrompt, reviewUserPrompt } from "./prompt.ts";
 import { generateWithFallback, type Generate } from "./providers.ts";
@@ -16,10 +16,11 @@ export async function reviewChunk(
   chunk: Chunk,
   totalChunks: number,
   config: Config,
+  rejected: RejectedFinding[] = [],
 ): Promise<ChunkReview> {
   const response = await generateWithFallback(generate, [config.llm.model, ...config.llm.fallbackModels], {
     system: reviewSystemPrompt(config),
-    prompt: reviewUserPrompt(changeSet, chunk, totalChunks, config),
+    prompt: reviewUserPrompt(changeSet, chunk, totalChunks, config, rejected),
     schema: reviewOutputSchema,
     schemaName: "code_review",
     repair: repairReviewOutput,

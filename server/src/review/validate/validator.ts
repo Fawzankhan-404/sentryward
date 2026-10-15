@@ -20,6 +20,8 @@ export type DropReason =
   | "empty"
   | "duplicate"
   | "over_limit"
+  // The same finding was dismissed by this team on this change (by fingerprint).
+  | "previously_ignored"
   // A second model call showed the finding wrong (verify.ts).
   | "refuted";
 
@@ -97,6 +99,8 @@ export function validateFindings(
   changeSet: ChangeSet,
   reviewed: ChangedFile[],
   config: Config,
+  // Fingerprints this team dismissed on this change; a match is dropped.
+  ignoredFingerprints?: ReadonlySet<string>,
 ): ValidationResult {
   const dropped: Partial<Record<DropReason, number>> = {};
   const drop = (reason: DropReason) => {
@@ -184,6 +188,11 @@ export function validateFindings(
       fingerprint: fingerprint({ file: file.path, category: candidate.category, kind, title }),
       bucket: bucketFor({ file: file.path, startLine: start, kind }, changeSet),
     };
+
+    if (ignoredFingerprints?.has(finding.fingerprint)) {
+      drop("previously_ignored");
+      continue;
+    }
 
     const existing = kept.get(finding.fingerprint);
     if (existing) drop("duplicate");

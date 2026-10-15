@@ -158,6 +158,11 @@ export type IssueRef = z.infer<typeof issueRefSchema>;
 // What the walkthrough reads about an issue; the body is never stored.
 export type IssueContext = IssueRef & { body: string };
 
+// A finding this team previously dismissed (false_positive/intentional), fed
+// back into the review so the model does not report it again. The note is the
+// user's own text and is treated as untrusted in the prompt.
+export type RejectedFinding = { title: string; category: string; file: string; note?: string };
+
 export const issueAssessmentSchema = z.enum(["addressed", "partial", "not_addressed", "unclear"]);
 export type IssueAssessment = z.infer<typeof issueAssessmentSchema>;
 

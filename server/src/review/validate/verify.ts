@@ -21,6 +21,10 @@ export interface VerifyInput {
   config: Config;
   generate: Generate;
   concurrency: number;
+  // Fingerprints this team dismissed on this change. Checked again here because
+  // demoting an uncertain finding changes its kind and so its fingerprint: one
+  // the validator passed can land on an ignored fingerprint only after verify.
+  ignoredFingerprints?: ReadonlySet<string>;
 }
 
 export interface VerifyResult {
@@ -126,6 +130,12 @@ export async function verifyFindings(input: VerifyInput): Promise<VerifyResult> 
           continue;
         }
       }
+    }
+    // Demotion can land a finding on an ignored fingerprint it did not have at
+    // validation time, so re-check before it is kept.
+    if (input.ignoredFingerprints?.has(next.fingerprint)) {
+      drop("previously_ignored");
+      continue;
     }
     // A demoted finding can land on the fingerprint of one already kept.
     const existing = kept.get(next.fingerprint);

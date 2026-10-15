@@ -1,8 +1,14 @@
 import type { Config } from "../config/schema.ts";
-import type { ChangeSet, Finding, IssueContext } from "../core/models.ts";
+import type { ChangeSet, Finding, IssueContext, RejectedFinding } from "../core/models.ts";
 import type { Chunk } from "../context/chunk.ts";
 
 const MAX_DESCRIPTION_CHARS = 4000;
+// How many recent dismissals to list, how much of each user note to keep, and
+// the hard bound on the whole section: titles, file paths and notes all come
+// from outside, so the section as a whole is capped and wrapped as untrusted.
+const MAX_REJECTED = 20;
+const MAX_REJECTED_NOTE_CHARS = 300;
+export const MAX_REJECTED_CHARS = 2000;
 
 const CATEGORY_HELP: Record<string, string> = {
   security: "injection, authz/authn gaps, secrets, unsafe deserialization, SSRF, path traversal",
@@ -60,13 +66,37 @@ function guidance(config: Config, languages: Set<string>): string {
   return sections.join("\n\n");
 }
 
-export function reviewUserPrompt(changeSet: ChangeSet, chunk: Chunk, totalChunks: number, config: Config): string {
+// Findings this team already dismissed. The model should not raise them again
+// unless the new change makes them clearly different. Titles come from earlier
+// model output, file paths from the repository and notes from the author, so
+// the whole list is wrapped as untrusted and capped in total length.
+function rejectedSection(rejected: RejectedFinding[]): string {
+  if (rejected.length === 0) return "";
+  const lines = rejected.slice(0, MAX_REJECTED).map((finding) => {
+    const head = `- [${finding.category}] ${finding.title} (${finding.file})`;
+    const note = finding.note?.trim();
+    return note ? `${head}\n  note: ${note.slice(0, MAX_REJECTED_NOTE_CHARS)}` : head;
+  });
+  return `Previously rejected by this team, do not report again unless the change makes them clearly different:\n${untrusted(
+    lines.join("\n"),
+    MAX_REJECTED_CHARS,
+  )}`;
+}
+
+export function reviewUserPrompt(
+  changeSet: ChangeSet,
+  chunk: Chunk,
+  totalChunks: number,
+  config: Config,
+  rejected: RejectedFinding[] = [],
+): string {
   const languages = new Set(chunk.parts.map((part) => part.file.language).filter((l): l is string => !!l));
   const pass = totalChunks > 1 ? `\nThis is review pass ${chunk.index} of ${totalChunks}; other files are reviewed separately.` : "";
   return [
     `Title: ${untrusted(changeSet.title, 300)}`,
     `Description:\n${untrusted(changeSet.description || "(none)", MAX_DESCRIPTION_CHARS)}`,
     guidance(config, languages),
+    rejectedSection(rejected),
     `Diff:${pass}\n${chunk.text}`,
     chunk.context ? `Context (read-only, from the new version of the code):\n${chunk.context}` : "",
   ]
