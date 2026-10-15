@@ -87,6 +87,10 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   postInline: { label: "Post inline comments", description: "Comment on the lines each finding refers to." },
   postSummary: { label: "Post summary comment", description: "Post the review summary as a comment on the change." },
   postCheck: { label: "Post commit status", description: "Report the verdict as the sentryward/review status." },
+  resolveFixedThreads: {
+    label: "Resolve fixed threads",
+    description: "Resolve a finding's inline thread once a later review no longer reports it, and reopen it if it returns.",
+  },
   reviewStats: {
     label: "Show review details",
     description: "Add a line under the summary with the commit, models and how much was reviewed.",
@@ -1022,6 +1026,8 @@ export function ConfigFields(props: {
           {/* Each prompt lives in the comment it belongs to. */}
           <ToggleList>{toggles(["agentPrompts"], !postInlineOn)}</ToggleList>
           <ToggleList>{toggles(["agentPromptAll"], !postSummaryOn)}</ToggleList>
+          {/* Only threads Sentryward opened are resolved. */}
+          <ToggleList>{toggles(["resolveFixedThreads"], !postInlineOn)}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section title="PR summary" description="A summary of what the change does, and labels from its estimates.">

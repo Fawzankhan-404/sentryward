@@ -305,6 +305,7 @@ In production, self-hosted forge hosts must use https and resolve to public addr
 When a review starts, Sentryward posts a "reviewing" summary comment and sets a pending `sentryward/review` commit status. When it finishes it publishes, each step independently:
 
 - **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Sentryward's own records are lost.
+- **Resolved threads** (`output.resolve_fixed_threads`, on by default): when a run reviews a file and no longer reports a finding, its inline thread is resolved (GitHub through GraphQL, GitLab by resolving the discussion); if the finding comes back, the thread is reopened, but only when Sentryward resolved it: a thread a person resolved stays resolved. Only threads Sentryward opened, and only for findings whose state changed, are touched. A thread update that fails is retried on later runs until it lands. Ignored findings are left alone.
 - **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`. One comment carries both what the change does (the walkthrough, when `output.walkthrough` is on) and what the review found. It ends with a line naming the commit, models and coverage, which `output.review_stats` turns off. With `output.post_summary` off, the walkthrough is posted as a comment of its own. `output.summary_location` is accepted but ignored, and a walkthrough block an earlier version wrote into the description is removed on the next review.
 - **The walkthrough's optional parts**, each with its own switch: the review effort estimate (`output.estimate_effort`), a Mermaid sequence diagram of the main flow (`output.sequence_diagrams`), an assessment of how well the change addresses the issues it closes (`output.assess_linked_issues`; "fixes #12" style references on GitHub, GitLab's own closing issues on GitLab) and possibly related issues found by searching the tracker for the title's keywords (`output.related_issues`). Only issues the forge returned are ever shown.
 - **The high-level summary** (`output.high_level_summary`): release notes by default, or whatever `output.high_level_summary_instructions` asks for. `output.high_level_summary_placement` puts it in the PR/MR description (the default, between hidden markers at the end, replaced on each run and never read back as the author's text) or in the walkthrough.
@@ -391,6 +392,7 @@ output:
   post_inline: true
   post_summary: true
   post_check: true
+  resolve_fixed_threads: true  # resolve a finding's inline thread once it is fixed
   review_stats: true        # the commit/models/coverage line under the summary
   agent_prompts: true       # a prompt for AI agents in each actionable inline comment
   agent_prompt_all: true    # one prompt for every finding in the summary comment

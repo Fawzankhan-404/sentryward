@@ -21,6 +21,7 @@ import {
   type HookTarget,
   type InlineComment,
   type InlineResult,
+  type ThreadResult,
 } from "./types.ts";
 
 export interface GitLabAdapterOptions {
@@ -117,6 +118,9 @@ interface GlNote {
   body: string;
   system: boolean;
   author: { username: string };
+  // Set on notes in a resolvable discussion, such as a diff thread.
+  resolved?: boolean;
+  resolved_by?: { username: string } | null;
 }
 
 interface GlDiscussion {
@@ -340,14 +344,72 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return result;
   }
 
+  // Sentryward opened the discussion: its first note is Sentryward's own.
+  private isOwn(discussion: GlDiscussion): boolean {
+    return Boolean(discussion.notes[0] && this.isSelf(discussion.notes[0]));
+  }
+
+  // Runs on every inline publish, so it keeps the default page cap; a marker
+  // past it only risks a duplicate comment.
   async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
-    const discussions = await this.http.paginate<GlDiscussion>(
-      `${this.mergeRequest(ref)}/discussions?per_page=100`,
-      nextPage,
-    );
-    return new Set(
-      discussions.flatMap((d) => d.notes.slice(0, 1)).filter((n) => this.isSelf(n)).flatMap((n) => markersIn(n.body)),
-    );
+    const discussions = await this.http.paginate<GlDiscussion>(`${this.mergeRequest(ref)}/discussions?per_page=100`, nextPage);
+    return new Set(discussions.filter((d) => this.isOwn(d)).flatMap((d) => markersIn(d.notes[0]!.body)));
+  }
+
+  async setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult> {
+    const result: ThreadResult = { updated: [], failed: [] };
+    if (fingerprints.length === 0) return result;
+    const wanted = new Set(fingerprints);
+    const seen = new Set<string>();
+    // Read a page at a time until every wanted discussion is found or they run
+    // out: a later run starts from the first page again, so stopping at a fixed
+    // cap would leave a discussion past it out of reach for good. Only runs
+    // with a thread to move pay for this, and pages are not kept.
+    let complete = false;
+    let url: string | null = `${this.mergeRequest(ref)}/discussions?per_page=100`;
+    while (url) {
+      const res = await this.http.request(url);
+      const page = (await res.json()) as GlDiscussion[];
+      for (const discussion of page) {
+        if (!this.isOwn(discussion)) continue;
+        const first = discussion.notes[0]!;
+        const print = markersIn(first.body).find((p) => wanted.has(p));
+        if (!print) continue;
+        seen.add(print);
+        // Not a diff thread, or already where it should be.
+        if (first.resolved === undefined || first.resolved === resolved) continue;
+        // Only a discussion Sentryward resolved is reopened; one a person
+        // resolved stays resolved.
+        if (!resolved && first.resolved_by?.username !== this.selfLogin) continue;
+        try {
+          await this.http.request(
+            `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
+            { method: "PUT" },
+          );
+          result.updated.push(print);
+        } catch (err) {
+          result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      const next = nextPage(res, url);
+      if (next === null || seen.size === wanted.size) {
+        complete = true;
+        break;
+      }
+      // A next page that does not move would loop forever.
+      if (next === url) break;
+      url = next;
+    }
+    // A discussion the listing never reached may still exist; reporting it as
+    // failed keeps it pending rather than settled.
+    if (!complete) {
+      for (const print of wanted) {
+        if (!seen.has(print)) {
+          result.failed.push({ fingerprint: print, error: "Discussion listing stopped early" });
+        }
+      }
+    }
+    return result;
   }
 
   upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {

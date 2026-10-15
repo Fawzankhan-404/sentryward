@@ -131,6 +131,105 @@ describe("GitHub publishing", () => {
     expect(await gh.listPostedFingerprints(ghRef)).toEqual(new Set(["aaaaaaaaaaaaaaaa"]));
   });
 
+  // Queries and mutations share one endpoint; the stub answers every call with
+  // the thread page, which a mutation's caller never reads.
+  const threadPage = {
+    data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              // GraphQL drops the app's "[bot]" suffix.
+              { id: "T1", isResolved: false, resolvedBy: null, comments: { nodes: [{ body: fingerprintMarker("aaaaaaaaaaaaaaaa"), author: { login: "sentryward" } }] } },
+              { id: "T2", isResolved: true, resolvedBy: { login: "sentryward" }, comments: { nodes: [{ body: fingerprintMarker("bbbbbbbbbbbbbbbb"), author: { login: "sentryward" } }] } },
+              { id: "T3", isResolved: false, resolvedBy: null, comments: { nodes: [{ body: fingerprintMarker("cccccccccccccccc"), author: { login: "mallory" } }] } },
+              // Sentryward's thread, but a person resolved it.
+              { id: "T4", isResolved: true, resolvedBy: { login: "alice" }, comments: { nodes: [{ body: fingerprintMarker("eeeeeeeeeeeeeeee"), author: { login: "sentryward" } }] } },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  it("resolves only its own open threads, found by marker", async () => {
+    const { gh, calls } = github([{ method: "POST", url: /^https:\/\/api\.github\.com\/graphql$/, body: threadPage }]);
+
+    const result = await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc"], true);
+
+    expect(result).toEqual({ updated: ["aaaaaaaaaaaaaaaa"], failed: [] });
+    expect(body(calls[0]!).variables).toEqual({ owner: "acme", name: "web", number: 42, after: null });
+    expect(calls).toHaveLength(2);
+    expect(body(calls[1]!)).toMatchObject({ variables: { id: "T1" } });
+    expect(body(calls[1]!).query).toContain("resolveReviewThread");
+  });
+
+  it("reopens only a thread it resolved itself", async () => {
+    const { gh, calls } = github([{ method: "POST", url: /\/graphql$/, body: threadPage }]);
+
+    // T4 was resolved by a person, so it stays resolved and counts as settled.
+    expect(await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "eeeeeeeeeeeeeeee"], false)).toEqual({
+      updated: ["bbbbbbbbbbbbbbbb"],
+      failed: [],
+    });
+    expect(calls).toHaveLength(2);
+    expect(body(calls[1]!).query).toContain("unresolveReviewThread");
+    expect(body(calls[1]!).variables).toEqual({ id: "T2" });
+  });
+
+  it("surfaces GraphQL errors sent with a 200", async () => {
+    const { gh } = github([{ method: "POST", url: /\/graphql$/, body: { errors: [{ message: "Resource not accessible by integration" }] } }]);
+    await expect(gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa"], true)).rejects.toThrow("Resource not accessible by integration");
+  });
+
+  it("uses the Enterprise GraphQL endpoint beside the REST API", async () => {
+    const stub = fetchStub([{ method: "POST", url: /^https:\/\/git\.acme\.dev\/api\/graphql$/, body: threadPage }]);
+    const ghe = new GitHubAdapter({ host: "git.acme.dev", token: async () => "t", selfLogin: "sentryward[bot]", fetch: stub.fetch });
+    expect((await ghe.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa"], true)).updated).toEqual(["aaaaaaaaaaaaaaaa"]);
+  });
+
+  it("stops reading threads once every wanted one is found", async () => {
+    const endless = structuredClone(threadPage);
+    endless.data.repository.pullRequest.reviewThreads.pageInfo = { hasNextPage: true, endCursor: "next" } as never;
+    const { gh, calls } = github([{ method: "POST", url: /\/graphql$/, body: endless }]);
+
+    expect((await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"], true)).updated).toEqual(["aaaaaaaaaaaaaaaa"]);
+    // One page read, one mutation.
+    expect(calls).toHaveLength(2);
+  });
+
+  it("keeps paging past a thousand threads until it finds the wanted one", async () => {
+    let reads = 0;
+    const fetch = async (_url: string | URL | Request, init: RequestInit = {}) => {
+      const { query, variables } = JSON.parse(String(init.body)) as { query: string; variables: { after: string | null } };
+      if (!query.includes("reviewThreads")) return Response.json({ data: {} });
+      reads++;
+      const last = reads === 15;
+      const nodes = last
+        ? [{ id: "FAR", isResolved: false, resolvedBy: null, comments: { nodes: [{ body: fingerprintMarker("ffffffffffffffff"), author: { login: "sentryward" } }] } }]
+        : [];
+      const pageInfo = { hasNextPage: !last, endCursor: `c${reads}` };
+      expect(variables.after).toBe(reads === 1 ? null : `c${reads - 1}`);
+      return Response.json({ data: { repository: { pullRequest: { reviewThreads: { pageInfo, nodes } } } } });
+    };
+    const gh = new GitHubAdapter({ host: "github.com", token: async () => "t", selfLogin: "sentryward[bot]", fetch });
+
+    expect(await gh.setThreadsResolved(ghRef, ["ffffffffffffffff"], true)).toEqual({ updated: ["ffffffffffffffff"], failed: [] });
+    expect(reads).toBe(15);
+  });
+
+  it("keeps an unreached thread pending when the cursor stops moving", async () => {
+    const stuck = structuredClone(threadPage);
+    stuck.data.repository.pullRequest.reviewThreads.pageInfo = { hasNextPage: true, endCursor: "same" } as never;
+    const { gh } = github([{ method: "POST", url: /\/graphql$/, body: stuck }]);
+
+    const result = await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "ffffffffffffffff"], true);
+
+    expect(result.updated).toEqual(["aaaaaaaaaaaaaaaa"]);
+    expect(result.failed).toEqual([{ fingerprint: "ffffffffffffffff", error: "Review thread listing stopped early" }]);
+  });
+
   it("sets the sentryward/review status on the head commit", async () => {
     const { gh, calls } = github([{ method: "POST", url: /\/statuses\/head$/, body: {} }]);
     await gh.setCommitStatus(ghRef, { state: "failure", description: "x".repeat(200), targetUrl: "http://app/r/1" });
@@ -226,6 +325,102 @@ describe("GitLab publishing", () => {
     ]);
     expect(await gl.upsertSummaryComment(glRef, "new")).toBe("3");
     expect(body(calls.at(-1)!)).toEqual({ body: "new" });
+  });
+
+  it("resolves and reopens only its own diff discussions", async () => {
+    const note = (fp: string, username: string, resolved?: boolean, resolver = "sentryward-bot") => ({
+      id: 1,
+      body: fingerprintMarker(fp),
+      system: false,
+      author: { username },
+      ...(resolved === undefined ? {} : { resolvable: true, resolved, resolved_by: resolved ? { username: resolver } : null }),
+    });
+    const { gl, calls } = gitlab([
+      {
+        url: /\/merge_requests\/42\/discussions\?per_page=100$/,
+        body: [
+          { id: "d1", notes: [note("aaaaaaaaaaaaaaaa", "sentryward-bot", false)] },
+          { id: "d2", notes: [note("bbbbbbbbbbbbbbbb", "sentryward-bot", true)] },
+          { id: "d3", notes: [note("cccccccccccccccc", "mallory", false)] },
+          { id: "d4", notes: [note("dddddddddddddddd", "sentryward-bot")] },
+          // Sentryward's discussion, but a person resolved it.
+          { id: "d5", notes: [note("eeeeeeeeeeeeeeee", "sentryward-bot", true, "alice")] },
+        ],
+      },
+      { method: "PUT", url: /\/discussions\/d[0-9]\?resolved=(true|false)$/, body: {} },
+    ]);
+    const prints = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc", "dddddddddddddddd", "eeeeeeeeeeeeeeee"];
+
+    expect(await gl.setThreadsResolved(glRef, prints, true)).toEqual({ updated: ["aaaaaaaaaaaaaaaa"], failed: [] });
+    expect(calls.at(-1)).toMatchObject({ method: "PUT" });
+    expect(calls.at(-1)!.url).toMatch(/\/discussions\/d1\?resolved=true$/);
+
+    expect(await gl.setThreadsResolved(glRef, prints, false)).toEqual({ updated: ["bbbbbbbbbbbbbbbb"], failed: [] });
+    expect(calls.at(-1)!.url).toMatch(/\/discussions\/d2\?resolved=false$/);
+  });
+
+  it("keeps paging past the old thirty-page limit", async () => {
+    let reads = 0;
+    const fetch = async (url: string | URL | Request) => {
+      if (String(url).includes("?resolved=")) return Response.json({});
+      reads++;
+      const last = reads === 35;
+      const discussions = last
+        ? [{ id: "far", notes: [{ id: 1, body: fingerprintMarker("ffffffffffffffff"), system: false, author: { username: "sentryward-bot" }, resolvable: true, resolved: false }] }]
+        : [];
+      return Response.json(discussions, { headers: last ? {} : { "x-next-page": String(reads + 1) } });
+    };
+    const gl = new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch });
+
+    expect(await gl.setThreadsResolved(glRef, ["ffffffffffffffff"], true)).toEqual({ updated: ["ffffffffffffffff"], failed: [] });
+    expect(reads).toBe(35);
+  });
+
+  it("stops reading discussions once every wanted thread is found", async () => {
+    let reads = 0;
+    const fetch = async (url: string | URL | Request) => {
+      if (String(url).includes("?resolved=")) return Response.json({});
+      reads++;
+      const discussions = [{ id: "d1", notes: [{ id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), system: false, author: { username: "sentryward-bot" }, resolvable: true, resolved: false }] }];
+      return Response.json(discussions, { headers: { "x-next-page": String(reads + 1) } });
+    };
+    const gl = new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch });
+
+    expect(await gl.setThreadsResolved(glRef, ["aaaaaaaaaaaaaaaa"], true)).toEqual({ updated: ["aaaaaaaaaaaaaaaa"], failed: [] });
+    expect(reads).toBe(1);
+  });
+
+  it("keeps the page cap when only listing posted fingerprints", async () => {
+    let reads = 0;
+    const fetch = async () => {
+      reads++;
+      return Response.json([], { headers: { "x-next-page": String(reads + 1) } });
+    };
+    const gl = new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch });
+
+    expect(await gl.listPostedFingerprints(glRef)).toEqual(new Set());
+    expect(reads).toBe(30);
+  });
+
+  it("keeps an unreached discussion pending when the next page stops moving", async () => {
+    const { gl } = gitlab([
+      {
+        url: /\/merge_requests\/42\/discussions\?per_page=100(&page=\d+)?$/,
+        headers: { "x-next-page": "2" },
+        body: [
+          {
+            id: "d1",
+            notes: [{ id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), system: false, author: { username: "sentryward-bot" }, resolvable: true, resolved: true }],
+          },
+        ],
+      },
+    ]);
+
+    // Already resolved, so settled; the unseen one stays pending.
+    expect(await gl.setThreadsResolved(glRef, ["aaaaaaaaaaaaaaaa", "ffffffffffffffff"], true)).toEqual({
+      updated: [],
+      failed: [{ fingerprint: "ffffffffffffffff", error: "Discussion listing stopped early" }],
+    });
   });
 
   it("maps states onto GitLab's commit status names", async () => {

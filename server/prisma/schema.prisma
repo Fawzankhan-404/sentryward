@@ -320,6 +320,9 @@ model Finding {
   // Set together with ignoredAt and cleared on reopen.
   ignoreReason IgnoreReason?   @map("ignore_reason")
   ignoreNote   String?         @map("ignore_note")
+  // The forge thread could not be moved to match `state` (a failed resolve or
+  // reopen). Later runs retry it until the forge agrees.
+  threadPending Boolean        @default(false) @map("thread_pending")
 
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   lastJob    ReviewJob? @relation(fields: [lastJobId], references: [id], onDelete: SetNull)

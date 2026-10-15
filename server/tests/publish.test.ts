@@ -71,7 +71,13 @@ describe("commitStatus", () => {
 });
 
 function recordingPublisher(
-  options: { onForge?: string[]; failInline?: boolean; description?: string; failDescription?: boolean } = {},
+  options: {
+    onForge?: string[];
+    failInline?: boolean;
+    description?: string;
+    failDescription?: boolean;
+    failThreads?: boolean;
+  } = {},
 ) {
   const calls = {
     inline: [] as InlineComment[],
@@ -80,6 +86,7 @@ function recordingPublisher(
     comments: [] as { marker: string; body: string }[],
     descriptions: [] as string[],
     labels: [] as { add: string[]; remove: string[] }[],
+    threads: [] as { fingerprints: string[]; resolved: boolean }[],
     // Which kind of comment went up when, across the kinds.
     order: [] as string[],
   };
@@ -114,6 +121,11 @@ function recordingPublisher(
     setCommitStatus: async (_ref, status) => {
       calls.statuses.push(status);
     },
+    setThreadsResolved: async (_ref, fingerprints, resolved) => {
+      if (options.failThreads) throw new Error("GraphQL request failed: nope");
+      calls.threads.push({ fingerprints, resolved });
+      return { updated: fingerprints, failed: [] };
+    },
   };
   return { publisher, calls };
 }
@@ -135,6 +147,62 @@ describe("publishReview", () => {
     expect(calls.inline).toHaveLength(2);
     expect(calls.statuses.map((s) => s.state)).toEqual(["failure"]);
     expect(publication).toMatchObject({ summaryCommentId: "s1", statusState: "failure", errors: [], inlineSkipped: 0 });
+  });
+
+  it("resolves threads for fixed findings and reopens ones that came back", async () => {
+    const { publisher, calls } = recordingPublisher();
+
+    const publication = await publishReview({
+      publisher,
+      changeSet: makeChangeSet(),
+      result: await sampleResult(),
+      config: config(),
+      postedFingerprints: new Set(),
+      resolvedFingerprints: ["aaaaaaaaaaaaaaaa"],
+      reopenedFingerprints: ["bbbbbbbbbbbbbbbb"],
+    });
+
+    expect(calls.threads).toEqual([
+      { fingerprints: ["aaaaaaaaaaaaaaaa"], resolved: true },
+      { fingerprints: ["bbbbbbbbbbbbbbbb"], resolved: false },
+    ]);
+    expect(publication).toMatchObject({
+      threadsResolved: ["aaaaaaaaaaaaaaaa"],
+      threadsReopened: ["bbbbbbbbbbbbbbbb"],
+      errors: [],
+    });
+  });
+
+  it("leaves threads alone when the setting or inline comments are off", async () => {
+    for (const output of [{ resolveFixedThreads: false }, { postInline: false }]) {
+      const { publisher, calls } = recordingPublisher();
+      await publishReview({
+        publisher,
+        changeSet: makeChangeSet(),
+        result: await sampleResult(),
+        config: config({ output }),
+        postedFingerprints: new Set(),
+        resolvedFingerprints: ["aaaaaaaaaaaaaaaa"],
+      });
+      expect(calls.threads).toEqual([]);
+    }
+  });
+
+  it("records a thread failure and still sets the commit status", async () => {
+    const { publisher, calls } = recordingPublisher({ failThreads: true });
+
+    const publication = await publishReview({
+      publisher,
+      changeSet: makeChangeSet(),
+      result: await sampleResult(),
+      config: config(),
+      postedFingerprints: new Set(),
+      resolvedFingerprints: ["aaaaaaaaaaaaaaaa"],
+    });
+
+    expect(publication.errors).toEqual(["Inline threads could not be resolved: GraphQL request failed: nope"]);
+    expect(publication.threadsFailed).toEqual(["aaaaaaaaaaaaaaaa"]);
+    expect(calls.statuses).toHaveLength(1);
   });
 
   it("posts the summary before the inline comments", async () => {

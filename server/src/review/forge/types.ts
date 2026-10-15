@@ -108,6 +108,13 @@ export interface InlineResult {
   failed: { fingerprint: string; error: string }[];
 }
 
+// Threads found and switched, by fingerprint. A fingerprint with no thread of
+// Sentryward's, or one already in the wanted state, is in neither list.
+export interface ThreadResult {
+  updated: string[];
+  failed: { fingerprint: string; error: string }[];
+}
+
 export type CommitState = "pending" | "success" | "failure" | "error";
 
 export interface CommitStatus {
@@ -132,4 +139,7 @@ export interface ForgePublisher {
   // Adds and removes labels; removing one the change does not carry is not an error.
   setLabels(ref: ForgeRef, add: string[], remove: string[]): Promise<void>;
   setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void>;
+  // Resolves (or reopens) Sentryward's own inline threads for these findings,
+  // found by the hidden fingerprint marker in each thread's first comment.
+  setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult>;
 }
