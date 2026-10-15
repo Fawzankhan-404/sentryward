@@ -8,6 +8,7 @@ import {
   hostOrigin,
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
+  MAX_CODE_SEARCH_RESULTS,
   type ChangeHead,
   type ChangeSummary,
   type CommitState,
@@ -293,6 +294,13 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       if (found.size >= MAX_CANDIDATE_ISSUES) break;
     }
     return [...found.values()].map(toIssue);
+  }
+
+  async searchCode(project: string, term: string, ref: string): Promise<string[]> {
+    const blobs = await this.http.json<{ path: string }[]>(
+      `${this.project(project)}/search?scope=blobs&search=${encodeURIComponent(term)}&ref=${encodeURIComponent(ref)}&per_page=${MAX_CODE_SEARCH_RESULTS}`,
+    );
+    return [...new Set(blobs.map((blob) => blob.path))];
   }
 
   private mergeRequest(ref: ForgeRef): string {

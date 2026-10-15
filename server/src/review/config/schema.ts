@@ -61,6 +61,9 @@ const reviewShape = {
   // Fetch the change and repository file fresh instead of reusing what an
   // earlier run in the same worker already fetched.
   disableCache: z.boolean(),
+  // Show each pass the enclosing scope, imports, definitions and callers of
+  // the changed code, read from the head revision, next to the diff.
+  fileContext: z.boolean(),
 };
 
 export const SUMMARY_LOCATIONS = ["dynamic", "description", "comment"] as const;
@@ -185,6 +188,7 @@ export const DEFAULT_CONFIG: Config = {
     fullFile: false,
     committableSuggestions: true,
     disableCache: false,
+    fileContext: true,
   },
   output: {
     walkthrough: true,

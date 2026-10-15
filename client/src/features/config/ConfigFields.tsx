@@ -65,6 +65,11 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Committable suggestions",
     description: "Offer fixes as suggestions that can be applied from the forge.",
   },
+  fileContext: {
+    label: "Surrounding code",
+    description:
+      "Show the reviewer the enclosing function, imports, called definitions and callers of the changed code, read from the head revision.",
+  },
   disableCache: {
     label: "Disable cache",
     description: "Disable caching of code and dependencies; fetch them fresh on each run.",
@@ -967,7 +972,7 @@ export function ConfigFields(props: {
         </Section>
         <FieldSeparator />
         <Section title="Review rules" description="How findings are checked and how fixes are offered.">
-          <ToggleList>{toggles(["requireEvidence", "fullFile", "committableSuggestions"])}</ToggleList>
+          <ToggleList>{toggles(["requireEvidence", "fullFile", "fileContext", "committableSuggestions"])}</ToggleList>
         </Section>
       </>
     ),

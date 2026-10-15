@@ -90,6 +90,10 @@ function deps(
       reads.push(`${ref}:${path}`);
       return files[`${ref}:${path}`] ?? null;
     },
+    searchCode: async (_p: string, term: string) => {
+      reads.push(`code:${term}`);
+      return [];
+    },
     listPostedFingerprints: async () => new Set(options.onForge ?? []),
     postInlineComments: async (_ref: unknown, comments: InlineComment[]) => {
       published.inline.push(...comments.map((c) => ({ fingerprint: c.fingerprint, startLine: c.startLine })));
@@ -152,8 +156,9 @@ describe("runJob", () => {
     // blockOn came from the saved repository settings.
     expect(result.verdict.blockOn).toBe("major");
     expect(stored.resolvedConfig).toMatchObject({ repoFile: ".sentryward.yaml", sources: { "review.blockOn": "repoSettings" } });
-    // The repository file is read at the base revision, never the head.
-    expect(reads).toEqual(["change", "base:.sentryward.yaml"]);
+    // The repository file is read at the base revision, never the head; review
+    // context is read at the head, and callers of the changed main() searched.
+    expect(reads).toEqual(["change", "base:.sentryward.yaml", "newhead:src/app.ts", "code:main"]);
     // The findings table follows the run, with the change's author.
     const findings = await prisma.finding.findMany({ where: { repositoryId, number: 42 } });
     expect(findings).toHaveLength(1);
@@ -443,7 +448,11 @@ describe("runJob issues and cache", () => {
     const cached = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
     await runJob(job, cached.runDeps);
     expect(cached.reads[0]).toBe("change:cached");
-    expect(cache.size).toBe(2);
+    // The change, the (missing) repository file and the changed file at head.
+    expect(cache.size).toBe(3);
+    const again = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
+    await runJob(await claimedJob(), again.runDeps);
+    expect(again.reads.filter((read) => read.startsWith("newhead:"))).toEqual([]);
 
     // Turned off by the repository file: the cached read is redone fresh. (A
     // file at a sha never changes, so a new one needs an emptied cache here.)
@@ -459,6 +468,7 @@ describe("runJob issues and cache", () => {
     const none = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
     await runJob(third, none.runDeps);
     expect(none.reads.filter((read) => read.startsWith("change"))).toEqual(["change"]);
+    expect(none.reads.filter((read) => read.startsWith("newhead:"))).toEqual(["newhead:src/app.ts"]);
   });
 });
 

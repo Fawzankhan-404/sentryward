@@ -5,7 +5,8 @@ import { skipFilterReason } from "../review/config/filters.ts";
 import { loadDashboardConfig, loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
 import type { ChangeSet } from "../review/core/models.ts";
-import { forgeCache, type ForgeCache } from "../review/forge/cache.ts";
+import type { ContextSource } from "../review/context/gather.ts";
+import { cacheKey, cached, forgeCache, type ForgeCache } from "../review/forge/cache.ts";
 import { searchTerms } from "../review/forge/issues.ts";
 import {
   abortableGenerate,
@@ -251,6 +252,16 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   const walkthrough = walkthroughEnabled(job.trigger, config, changeSet.isDraft);
   const issues = walkthrough ? await walkthroughIssues(forge, changeSet, config, warnings) : undefined;
   const generate = deps.generateFor(keys, endpoint, baseUrls);
+  // Files at the head sha never change, so they share the config file's cache
+  // key shape. Code search results are not fixed by a sha and stay uncached.
+  const fileCache = cacheFor(config.review.disableCache);
+  const context: ContextSource = {
+    readFile: (path) =>
+      cached(fileCache, cacheKey("file", forge.host, repo.fullPath, path, ref.headSha), () =>
+        forge.getFileAtRef(repo.fullPath, path, ref.headSha),
+      ),
+    searchCode: (term) => forge.searchCode(repo.fullPath, term, ref.headSha),
+  };
   let result;
   try {
     result = await runReview(
@@ -264,7 +275,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
         warnings,
         issues,
       },
-      { generate: watch ? abortableGenerate(generate, watch.signal) : generate },
+      { generate: watch ? abortableGenerate(generate, watch.signal) : generate, context },
     );
   } finally {
     watch?.stop();

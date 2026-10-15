@@ -8,6 +8,7 @@ import { closingIssueNumbers, MAX_CANDIDATE_ISSUES } from "./issues.ts";
 import {
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
+  MAX_CODE_SEARCH_RESULTS,
   type ChangeHead,
   type ChangeSummary,
   type CommitStatus,
@@ -289,6 +290,17 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       `/search/issues?q=${encodeURIComponent(query)}&per_page=${MAX_CANDIDATE_ISSUES}`,
     );
     return result.items.filter((issue) => !issue.pull_request).map(toIssue);
+  }
+
+  // GitHub's code search only indexes the default branch, so `ref` cannot be
+  // honoured. That suits finding callers: the files a change touches are in
+  // its diff, and the rest rarely differ from the default branch.
+  async searchCode(project: string, term: string, _ref: string): Promise<string[]> {
+    const query = `${term} repo:${project}`;
+    const result = await this.http.json<{ items: { path: string }[] }>(
+      `/search/code?q=${encodeURIComponent(query)}&per_page=${MAX_CODE_SEARCH_RESULTS}`,
+    );
+    return [...new Set(result.items.map((item) => item.path))];
   }
 
   private isSelf(comment: GhComment): boolean {
