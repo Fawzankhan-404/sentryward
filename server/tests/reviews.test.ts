@@ -213,8 +213,10 @@ describe("GET /api/reviews filters", () => {
   });
 
   it("hides superseded runs unless asked for", async () => {
-    await job({ number: 1, status: "superseded" });
-    await job({ number: 2 });
+    // Explicit timestamps: back-to-back inserts can share a millisecond, and the
+    // tiebreak on a random UUID would then make the order flaky.
+    await job({ number: 1, status: "superseded", createdAt: new Date("2026-01-01") });
+    await job({ number: 2, createdAt: new Date("2026-01-02") });
 
     expect(numbers(await get(""))).toEqual([2]);
     expect(numbers(await get("includeSuperseded=true"))).toEqual([2, 1]);
