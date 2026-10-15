@@ -198,6 +198,9 @@ describe("pricing", () => {
     expect(costOf([call("anthropic/claude-sonnet-5-5"), call("openai/unknown")])).toBeNull();
     expect(costOf([call("openai/unknown")], parsePrice("1, 2"))).toBeCloseTo(1.2);
     expect(() => parsePrice("1")).toThrow(/--price/);
+    for (const bad of [",10", "1,", "Infinity,10", "1,NaN", "1,2,3", "-1,2"]) {
+      expect(() => parsePrice(bad), bad).toThrow(/--price/);
+    }
   });
 });
 

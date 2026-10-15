@@ -17,9 +17,15 @@ export const PRICES: Record<string, Price> = {
 
 // "<input>,<output>", e.g. "2,10".
 export function parsePrice(text: string): Price {
-  const [input, output, ...rest] = text.split(",").map((part) => Number(part.trim()));
-  if (rest.length > 0 || input === undefined || output === undefined || !(input >= 0) || !(output >= 0)) {
-    throw new Error(`--price expects "<input>,<output>" in USD per million tokens, got "${text}"`);
+  const usage = `--price expects "<input>,<output>" in USD per million tokens, got "${text}"`;
+  // Number("") is 0 and Number("Infinity") is Infinity, so both need
+  // rejecting explicitly: one would price tokens as free, the other would
+  // serialise totals as null.
+  const parts = text.split(",").map((part) => part.trim());
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) throw new Error(usage);
+  const [input, output] = parts.map(Number) as [number, number];
+  if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+    throw new Error(usage);
   }
   return { input, output };
 }
