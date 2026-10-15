@@ -23,6 +23,12 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
   same false positive is less likely on later PRs. "Fix later" and "not
   specified" dismissals are not used. `review.suppress_ignored` (on by default)
   turns it off, from the dashboard or `.sentryward.yaml`.
+- When a change is split into several review passes, every pass gets a
+  bounded list of all reviewable files with their change type, line counts and
+  the walkthrough's one-line summary, so problems spanning files in different
+  passes are visible. In that case the walkthrough runs before the passes
+  instead of alongside them; if it fails, the passes still get the file list.
+  Single-pass reviews are unchanged.
 
 ### Fixed
 
