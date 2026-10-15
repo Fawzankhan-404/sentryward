@@ -107,10 +107,14 @@ export function FindingsSection({ result }: { result: ReviewResult }) {
     })
   }
 
+  // An empty list from a partial or failed run only means nothing was reported,
+  // not that the change is clean, so only a completed run gets the all-clear.
   if (result.findings.length === 0) {
     return (
       <section aria-label="Findings" className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        No findings. Nothing in this change needs attention.
+        {result.status === "completed"
+          ? "No findings. Nothing in this change needs attention."
+          : "No findings were reported; review coverage was incomplete."}
       </section>
     )
   }
