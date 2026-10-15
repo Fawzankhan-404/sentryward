@@ -1,5 +1,5 @@
 import type { Config } from "../config/schema.ts";
-import type { ChangeSet, Finding, IssueContext, RejectedFinding } from "../core/models.ts";
+import type { ChangeSet, Finding, IssueContext, RejectedFinding, ReviewResult } from "../core/models.ts";
 import type { Chunk } from "../context/chunk.ts";
 
 const MAX_DESCRIPTION_CHARS = 4000;
@@ -9,6 +9,13 @@ const MAX_DESCRIPTION_CHARS = 4000;
 const MAX_REJECTED = 20;
 const MAX_REJECTED_NOTE_CHARS = 300;
 export const MAX_REJECTED_CHARS = 2000;
+// The manifest of the whole change shown to each pass of a multi-pass review.
+// It is there for orientation, not review, so it is capped hard: summaries are
+// cut short and files past the cap are only counted.
+export const MAX_MANIFEST_CHARS = 3000;
+const MAX_MANIFEST_SUMMARY_CHARS = 160;
+
+export type ManifestEntry = ReviewResult["files"][number] & { summary?: string };
 
 const CATEGORY_HELP: Record<string, string> = {
   security: "injection, authz/authn gaps, secrets, unsafe deserialization, SSRF, path traversal",
@@ -83,20 +90,61 @@ function rejectedSection(rejected: RejectedFinding[]): string {
   )}`;
 }
 
+// Every reviewable file of the change, so a pass can tell that a caller or
+// callee it cannot see was changed elsewhere. Paths come from the repository and
+// summaries from model output over the diff, so the list is wrapped as untrusted.
+function manifestSection(entries: ManifestEntry[], chunk: Chunk): string {
+  const inPass = new Set(chunk.parts.map((part) => part.file.path));
+  // File names come first: a summary only gets room once every file that fits
+  // is listed, so optional prose never pushes a changed caller out of the list.
+  const lines: string[] = [];
+  let chars = 0;
+  for (const entry of entries) {
+    const path = entry.previousPath ? `${entry.previousPath} -> ${entry.path}` : entry.path;
+    const mark = inPass.has(entry.path) ? " [this pass]" : "";
+    const line = `- ${path} (${entry.changeType}, +${entry.additions} -${entry.deletions})${mark}`;
+    // Room is kept for the count of files left out.
+    if (chars + line.length + 1 > MAX_MANIFEST_CHARS - 40) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const listed = lines.length;
+  for (let index = 0; index < listed; index += 1) {
+    const summary = entries[index]!.summary?.trim().replaceAll("\n", " ").slice(0, MAX_MANIFEST_SUMMARY_CHARS);
+    if (!summary || chars + summary.length + 2 > MAX_MANIFEST_CHARS - 40) continue;
+    lines[index] += `: ${summary}`;
+    chars += summary.length + 2;
+  }
+  if (listed < entries.length) lines.push(`- and ${entries.length - listed} more files`);
+  return `Files in this change (read-only; only files with a FILE header in this pass can carry findings):\n${untrusted(
+    lines.join("\n"),
+    MAX_MANIFEST_CHARS,
+  )}`;
+}
+
 export function reviewUserPrompt(
   changeSet: ChangeSet,
   chunk: Chunk,
   totalChunks: number,
   config: Config,
   rejected: RejectedFinding[] = [],
+  manifest?: ManifestEntry[],
 ): string {
   const languages = new Set(chunk.parts.map((part) => part.file.language).filter((l): l is string => !!l));
-  const pass = totalChunks > 1 ? `\nThis is review pass ${chunk.index} of ${totalChunks}; other files are reviewed separately.` : "";
+  // A single pass already sees the whole change, so it gets no manifest.
+  const withManifest = totalChunks > 1 && !!manifest?.length;
+  const pass =
+    totalChunks > 1
+      ? withManifest
+        ? `\nThis is review pass ${chunk.index} of ${totalChunks}; other files are reviewed in other passes, and the list above shows the whole change.`
+        : `\nThis is review pass ${chunk.index} of ${totalChunks}; other files are reviewed separately.`
+      : "";
   return [
     `Title: ${untrusted(changeSet.title, 300)}`,
     `Description:\n${untrusted(changeSet.description || "(none)", MAX_DESCRIPTION_CHARS)}`,
     guidance(config, languages),
     rejectedSection(rejected),
+    withManifest && manifest ? manifestSection(manifest, chunk) : "",
     `Diff:${pass}\n${chunk.text}`,
     chunk.context ? `Context (read-only, from the new version of the code):\n${chunk.context}` : "",
   ]

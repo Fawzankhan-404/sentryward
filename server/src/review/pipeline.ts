@@ -16,7 +16,7 @@ import { contextTokenBudget, estimateTokens, diffTokenBudget } from "./context/b
 import { planChunks, type Chunk } from "./context/chunk.ts";
 import { gatherContext, type ContextSource } from "./context/gather.ts";
 import { classifyFiles } from "./context/ignore.ts";
-import { MAX_REJECTED_CHARS, reviewSystemPrompt } from "./llm/prompt.ts";
+import { MAX_MANIFEST_CHARS, MAX_REJECTED_CHARS, reviewSystemPrompt, type ManifestEntry } from "./llm/prompt.ts";
 import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
@@ -63,6 +63,9 @@ const INCOMPLETE: ReadonlySet<OmissionReason> = new Set([
 // measured system prompt. The last term covers the rejected section (its
 // MAX_REJECTED_CHARS at ~4 chars/token) so it cannot crowd out the diff.
 const USER_PROMPT_ALLOWANCE = 3_000 + Math.ceil(MAX_REJECTED_CHARS / 4);
+// A multi-pass review also lists the whole change in every pass, capped at
+// MAX_MANIFEST_CHARS.
+const MANIFEST_ALLOWANCE = Math.ceil(MAX_MANIFEST_CHARS / 4);
 
 function lineCounts(changeSet: ChangeSet): ReviewResult["files"] {
   return changeSet.files.map((file) => {
@@ -100,8 +103,16 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   const usage: LlmUsage[] = [];
 
   const { reviewable, omissions: classified } = classifyFiles(changeSet.files, config.ignorePaths);
-  const overhead = estimateTokens(reviewSystemPrompt(config)) + USER_PROMPT_ALLOWANCE;
-  const plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+  let overhead = estimateTokens(reviewSystemPrompt(config)) + USER_PROMPT_ALLOWANCE;
+  let plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+  // Only a change that needs several passes gets the manifest, so only then is
+  // it paid for, and a single-pass review is planned exactly as before. Should
+  // the smaller budget ever leave one pass, the prompt simply omits the list.
+  const multiPass = plan.chunks.length > 1;
+  if (multiPass) {
+    overhead += MANIFEST_ALLOWANCE;
+    plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+  }
   const omissions: Omission[] = [...classified, ...plan.omissions];
 
   const walkthroughTask: Promise<Walkthrough | undefined> =
@@ -137,13 +148,28 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     }
   }
 
+  // Several passes wait for the walkthrough (started above, alongside context
+  // gathering) so each can be told what the files it cannot see do. A failed
+  // walkthrough still leaves the file list.
+  let manifest: ManifestEntry[] | undefined;
+  if (multiPass) {
+    const summaries = new Map(((await walkthroughTask)?.fileSummaries ?? []).map((entry) => [entry.path, entry.summary]));
+    const paths = new Set(reviewable.map((file) => file.path));
+    manifest = lineCounts(changeSet)
+      .filter((file) => paths.has(file.path))
+      .map((file) => {
+        const summary = summaries.get(file.path);
+        return summary ? { ...file, summary } : file;
+      });
+  }
+
   const raw: ModelFinding[] = [];
   let failedPasses = 0;
   const outcomes = await mapLimit(chunks, deps.concurrency ?? 3, async (chunk) => {
     try {
       return {
         chunk,
-        review: await reviewChunk(deps.generate, changeSet, chunk, chunks.length, config, input.rejectedFindings),
+        review: await reviewChunk(deps.generate, changeSet, chunk, chunks.length, config, input.rejectedFindings, manifest),
       };
     } catch (err) {
       return { chunk, error: errorMessage(err) };
