@@ -1,5 +1,6 @@
 import { posix } from "node:path";
 import type { Hunk } from "../core/models.ts";
+import { escapeRegExp } from "../core/regex.ts";
 import type { LineRange } from "./fileContext.ts";
 
 // Names the diff defines and calls, found by pattern rather than by parsing,
@@ -143,7 +144,7 @@ const CALL_SITE_AFTER = 3;
 // Windows around lines that call `name`, as a function or a method, skipping
 // its declaration.
 export function callSites(lines: string[], name: string, limit: number): LineRange[] {
-  const pattern = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}\\s*\\(`);
+  const pattern = new RegExp(`(?<![\\w$])${escapeRegExp(name)}\\s*\\(`);
   const ranges: LineRange[] = [];
   for (let n = 1; n <= lines.length && ranges.length < limit; n++) {
     const line = lines[n - 1]!;

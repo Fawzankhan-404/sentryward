@@ -1,3 +1,5 @@
+import { escapeRegExp } from "../core/regex.ts";
+
 // Shared by the forge adapters' issue lookups: which issues a description says
 // it closes, and which words of a title are worth searching for.
 
@@ -8,10 +10,6 @@ export const MAX_CANDIDATE_ISSUES = 10;
 const MAX_SEARCH_TERMS = 4;
 
 const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+((?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/\S+\/issues\/\d+)/gi;
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 // Issue numbers the description closes with GitHub's keywords ("fixes #12",
 // "closes owner/repo#12", "resolves https://host/owner/repo/issues/12"). Only

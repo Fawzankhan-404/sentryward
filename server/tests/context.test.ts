@@ -6,7 +6,7 @@ import { contextTokenBudget } from "../src/review/context/budget.ts";
 import { planChunks } from "../src/review/context/chunk.ts";
 import { changedSpan, enclosingScope, fileContextBlocks, fileLines, importBlock } from "../src/review/context/fileContext.ts";
 import { fillContext, gatherContext, type ContextSource } from "../src/review/context/gather.ts";
-import { moduleCandidates, partSymbols, relativeImports } from "../src/review/context/symbols.ts";
+import { callSites, moduleCandidates, partSymbols, relativeImports } from "../src/review/context/symbols.ts";
 import { GitHubAdapter } from "../src/review/forge/github.ts";
 import { GitLabAdapter } from "../src/review/forge/gitlab.ts";
 import { runReview } from "../src/review/pipeline.ts";
@@ -164,6 +164,15 @@ describe("symbols", () => {
 
     expect(relativeImports("from .helpers import parse as p, load\n").get("p")).toEqual({ module: ".helpers", exported: "parse" });
     expect(moduleCandidates("pkg/sub/mod.py", "..util")).toEqual(["pkg/util.py", "pkg/util/__init__.py"]);
+  });
+});
+
+describe("callSites", () => {
+  it("matches names literally, metacharacters included", () => {
+    const lines = ["const a = $fetch(url);", "", "", "", "", "axb(1);", "", "", "", "", "a.b\\(2);"];
+    expect(callSites(lines, "$fetch", 3)).toEqual([{ start: 1, end: 4 }]);
+    // Unescaped, "." would also match the "x" in axb on line 6.
+    expect(callSites(lines, "a.b\\", 3)).toEqual([{ start: 6, end: 11 }]);
   });
 });
 
