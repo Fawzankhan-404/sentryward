@@ -14,7 +14,8 @@ export interface PublishInput {
   config: Config;
   // Fingerprints already posted on this change, from the database.
   postedFingerprints: Set<string>;
-  // Findings this run moves to resolved, or back to open (findingTransitions).
+  // Threads to resolve, or reopen (threadOperations): this run's transitions
+  // plus earlier updates that failed.
   resolvedFingerprints?: string[];
   reopenedFingerprints?: string[];
   // Where the commit status links: the review in the dashboard.
@@ -34,6 +35,8 @@ export interface Publication {
   // Inline threads this run resolved or reopened, by fingerprint.
   threadsResolved?: string[];
   threadsReopened?: string[];
+  // Threads that could not be moved; they are retried on the next run.
+  threadsFailed?: string[];
   errors: string[];
 }
 
@@ -57,6 +60,7 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
     labels: [],
     threadsResolved: [],
     threadsReopened: [],
+    threadsFailed: [],
     errors: [],
   };
   const placement = summaryPlacement(config, result);
@@ -103,7 +107,7 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
 
   // Threads follow the findings table: only what this run resolved or brought
   // back is touched, so a thread someone resolved or reopened by hand stays so.
-  if (config.output.postInline && config.output.resolveFixedThreads) {
+  if (resolvesThreads(config)) {
     const steps = [
       { prints: input.resolvedFingerprints ?? [], resolved: true, verb: "resolved" },
       { prints: input.reopenedFingerprints ?? [], resolved: false, verb: "reopened" },
@@ -115,9 +119,11 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
         if (step.resolved) publication.threadsResolved = outcome.updated;
         else publication.threadsReopened = outcome.updated;
         if (outcome.failed.length) {
+          publication.threadsFailed!.push(...outcome.failed.map((f) => f.fingerprint));
           publication.errors.push(`${outcome.failed.length} inline thread(s) could not be ${step.verb}`);
         }
       } catch (err) {
+        publication.threadsFailed!.push(...step.prints);
         publication.errors.push(`Inline threads could not be ${step.verb}: ${message(err)}`);
       }
     }
@@ -189,6 +195,11 @@ export function descriptionSummary(config: Config, result: ReviewResult): string
   const { walkthrough, highLevelSummary, highLevelSummaryPlacement } = config.output;
   if (!walkthrough || !highLevelSummary || highLevelSummaryPlacement !== "description") return "";
   return descriptionSummaryBlock(result) || null;
+}
+
+// Threads hang off inline comments, so resolving them needs both switches.
+export function resolvesThreads(config: Config): boolean {
+  return config.output.postInline && config.output.resolveFixedThreads;
 }
 
 export function publishes(config: Config): boolean {

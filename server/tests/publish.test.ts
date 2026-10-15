@@ -201,6 +201,7 @@ describe("publishReview", () => {
     });
 
     expect(publication.errors).toEqual(["Inline threads could not be resolved: GraphQL request failed: nope"]);
+    expect(publication.threadsFailed).toEqual(["aaaaaaaaaaaaaaaa"]);
     expect(calls.statuses).toHaveLength(1);
   });
 

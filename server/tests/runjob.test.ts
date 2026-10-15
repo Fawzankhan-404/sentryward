@@ -99,6 +99,8 @@ function deps(
     issues?: { linked?: IssueContext[]; found?: IssueContext[] };
     title?: string;
     cache?: ForgeCache;
+    // Every thread update fails, as a forge outage would.
+    failThreads?: boolean;
   } = {},
 ) {
   const reads: string[] = [];
@@ -158,6 +160,7 @@ function deps(
       published.statuses.push(status.state);
     },
     setThreadsResolved: async (_ref: unknown, fingerprints: string[], resolved: boolean) => {
+      if (options.failThreads) throw new Error("502 Bad Gateway");
       published.threads.push({ fingerprints, resolved });
       return { updated: fingerprints, failed: [] };
     },
@@ -377,6 +380,37 @@ describe("runJob", () => {
     await enqueue({ repositoryId, number: 42, headSha: "back", trigger: "manual" });
     await runJob((await claimNext())!, back.runDeps);
     expect(back.published.threads).toEqual([{ fingerprints: [print], resolved: false }]);
+  });
+
+  it("retries a thread update that failed on a later run, until it lands", async () => {
+    const found = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+    const clean = { code_review: { findings: [] }, walkthrough: WALKTHROUGH };
+    const first = deps({}, found);
+    await runJob(await claimedJob(), first.runDeps);
+    const print = first.published.inline[0]!.fingerprint;
+    const row = () => prisma.finding.findFirstOrThrow({ where: { fingerprint: print } });
+
+    const outage = deps({}, clean, { anthropic: "k" }, { failThreads: true });
+    await enqueue({ repositoryId, number: 42, headSha: "fixed", trigger: "manual" });
+    const outageJob = (await claimNext())!;
+    await runJob(outageJob, outage.runDeps);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: outageJob.id } });
+    expect(stored.status).toBe("partial");
+    expect(stored.publication).toMatchObject({ threadsFailed: [print] });
+    expect(await row()).toMatchObject({ state: "resolved", threadPending: true });
+
+    // Still fixed: no new transition, but the failed resolve is retried.
+    const retry = deps({}, clean);
+    await enqueue({ repositoryId, number: 42, headSha: "again", trigger: "manual" });
+    await runJob((await claimNext())!, retry.runDeps);
+    expect(retry.published.threads).toEqual([{ fingerprints: [print], resolved: true }]);
+    expect(await row()).toMatchObject({ state: "resolved", threadPending: false });
+
+    // Settled: nothing left to retry.
+    const quiet = deps({}, clean);
+    await enqueue({ repositoryId, number: 42, headSha: "quiet", trigger: "manual" });
+    await runJob((await claimNext())!, quiet.runDeps);
+    expect(quiet.published.threads).toEqual([]);
   });
 
   it("trusts markers already on the forge when the database has no row", async () => {

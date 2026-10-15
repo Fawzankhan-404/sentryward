@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../src/app.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import type { ReviewResult } from "../src/review/core/models.ts";
-import { findingTransitions, syncFindings } from "../src/worker/syncFindings.ts";
+import { findingTransitions, syncFindings, threadOperations } from "../src/worker/syncFindings.ts";
 import { sampleResult } from "./helpers/result.ts";
 import { createUser } from "./helpers/users.ts";
 
@@ -136,6 +136,44 @@ describe("findingTransitions", () => {
     const skipped = { ...base, coverage: { ...base.coverage, reviewedFiles: base.coverage.reviewedFiles.filter((f) => f !== file) } };
     expect(findingTransitions(existing, skipped).resolved).toEqual([]);
     expect(findingTransitions(existing, { ...base, status: "failed" })).toEqual({ resolved: [], reopened: [] });
+  });
+});
+
+describe("threadOperations", () => {
+  it("adds failed thread updates, toward the state the finding now has", () => {
+    const existing = [
+      { fingerprint: "aaaaaaaaaaaaaaaa", state: "resolved", file: "a.ts", threadPending: true },
+      { fingerprint: "bbbbbbbbbbbbbbbb", state: "open", file: "a.ts", threadPending: true },
+      { fingerprint: "cccccccccccccccc", state: "ignored", file: "a.ts", threadPending: true },
+      { fingerprint: "dddddddddddddddd", state: "open", file: "a.ts", threadPending: false },
+      // Pending a reopen, but this run resolves it again: the transition wins.
+      { fingerprint: "eeeeeeeeeeeeeeee", state: "open", file: "a.ts", threadPending: true },
+    ];
+    expect(threadOperations(existing, { resolved: ["eeeeeeeeeeeeeeee"], reopened: [] })).toEqual({
+      resolve: ["eeeeeeeeeeeeeeee", "aaaaaaaaaaaaaaaa"],
+      reopen: ["bbbbbbbbbbbbbbbb"],
+    });
+  });
+});
+
+describe("syncFindings thread outcome", () => {
+  it("marks failed thread updates pending and clears settled ones, even for a failed run", async () => {
+    await sync(base);
+    const [failed, settled] = base.findings.map((f) => f.fingerprint);
+    const { id } = await job(repoId, 7, base);
+    await syncFindings({ repositoryId: repoId, number: 7, jobId: id, result: base, threads: { attempted: [failed!, settled!], failed: [failed!] } });
+    const pending = async (print: string) => (await prisma.finding.findFirstOrThrow({ where: { fingerprint: print } })).threadPending;
+    expect(await pending(failed!)).toBe(true);
+    expect(await pending(settled!)).toBe(false);
+
+    await syncFindings({
+      repositoryId: repoId,
+      number: 7,
+      jobId: id,
+      result: { ...base, status: "failed" },
+      threads: { attempted: [failed!], failed: [] },
+    });
+    expect(await pending(failed!)).toBe(false);
   });
 });
 

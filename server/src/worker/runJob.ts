@@ -19,7 +19,7 @@ import {
 } from "../review/llm/providers.ts";
 import type { WalkthroughIssues } from "../review/llm/walkthrough.ts";
 import { runReview } from "../review/pipeline.ts";
-import { publishes, publishReview } from "../review/publish/publisher.ts";
+import { publishes, publishReview, resolvesThreads } from "../review/publish/publisher.ts";
 import { pendingStatus } from "../review/publish/status.ts";
 import { summarize } from "../review/render/json.ts";
 import { progressMarkdown } from "../review/render/progress.ts";
@@ -27,7 +27,7 @@ import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
 import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
-import { findingTransitions, syncFindings } from "./syncFindings.ts";
+import { findingTransitions, syncFindings, threadOperations, type ThreadOutcome } from "./syncFindings.ts";
 
 // How many recent dismissals to feed into the review prompt; bounded so a noisy
 // repository cannot grow the prompt without limit.
@@ -321,6 +321,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   }
 
   let publication = null;
+  let threadOutcome: ThreadOutcome | null = null;
   if (publishes(config)) {
     const [already, findings] = await Promise.all([
       prisma.postedFinding.findMany({
@@ -329,21 +330,25 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
       }),
       prisma.finding.findMany({
         where: { repositoryId: repo.id, number: job.number },
-        select: { fingerprint: true, state: true, file: true },
+        select: { fingerprint: true, state: true, file: true, threadPending: true },
       }),
     ]);
-    // The same answer syncFindings writes after the job is stored.
-    const transitions = findingTransitions(findings, result);
+    // The same transitions syncFindings writes after the job is stored, plus
+    // thread updates an earlier run could not make.
+    const threads = threadOperations(findings, findingTransitions(findings, result));
     publication = await publishReview({
       publisher: forge,
       changeSet,
       result,
       config,
       postedFingerprints: new Set(already.map((row) => row.fingerprint)),
-      resolvedFingerprints: transitions.resolved,
-      reopenedFingerprints: transitions.reopened,
+      resolvedFingerprints: threads.resolve,
+      reopenedFingerprints: threads.reopen,
       targetUrl,
     });
+    if (resolvesThreads(config)) {
+      threadOutcome = { attempted: [...threads.resolve, ...threads.reopen], failed: publication.threadsFailed ?? [] };
+    }
     if (publication.inlinePosted.length) {
       await prisma.postedFinding.createMany({
         data: publication.inlinePosted.map((posted) => ({
@@ -375,7 +380,14 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   // A run superseded or cancelled meanwhile no longer speaks for the change.
   // The review itself is stored by now, so a failed sync must not fail the job.
   if (stored) {
-    await syncFindings({ repositoryId: repo.id, number: job.number, jobId: job.id, author: changeSet.author, result }).catch(
+    await syncFindings({
+      repositoryId: repo.id,
+      number: job.number,
+      jobId: job.id,
+      author: changeSet.author,
+      result,
+      threads: threadOutcome,
+    }).catch(
       (err: unknown) => console.error(`[worker] could not sync findings for job ${job.id}`, err),
     );
   }
