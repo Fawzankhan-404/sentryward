@@ -32,6 +32,7 @@ export interface ConfigOverride {
     maxChunks?: number
     minConfidence?: number
     requireEvidence?: boolean
+    suppressIgnored?: boolean
     fullFile?: boolean
     committableSuggestions?: boolean
     disableCache?: boolean
@@ -101,6 +102,7 @@ export interface EffectiveConfig {
     maxChunks: number
     minConfidence: number
     requireEvidence: boolean
+    suppressIgnored: boolean
     fullFile: boolean
     committableSuggestions: boolean
     disableCache: boolean

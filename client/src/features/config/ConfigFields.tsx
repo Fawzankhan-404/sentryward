@@ -60,6 +60,11 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Require evidence",
     description: "Critical and major findings without evidence are demoted instead of blocking.",
   },
+  suppressIgnored: {
+    label: "Suppress dismissed findings",
+    description:
+      "Do not report findings this team dismissed as false positives or intentional again, and tell the reviewer what the repository has recently rejected.",
+  },
   fullFile: { label: "Comment on untouched lines", description: "Allow findings outside the lines the change touched." },
   committableSuggestions: {
     label: "Committable suggestions",
@@ -982,7 +987,9 @@ export function ConfigFields(props: {
         </Section>
         <FieldSeparator />
         <Section title="Review rules" description="How findings are checked and how fixes are offered.">
-          <ToggleList>{toggles(["requireEvidence", "fullFile", "fileContext", "committableSuggestions"])}</ToggleList>
+          <ToggleList>
+            {toggles(["requireEvidence", "suppressIgnored", "fullFile", "fileContext", "committableSuggestions"])}
+          </ToggleList>
           {choiceField("verify")}
         </Section>
       </>

@@ -6,6 +6,7 @@ import {
   type LlmUsage,
   type Omission,
   type OmissionReason,
+  type RejectedFinding,
   type ReviewResult,
   type ReviewStatus,
   type Walkthrough,
@@ -15,7 +16,7 @@ import { contextTokenBudget, estimateTokens, diffTokenBudget } from "./context/b
 import { planChunks, type Chunk } from "./context/chunk.ts";
 import { gatherContext, type ContextSource } from "./context/gather.ts";
 import { classifyFiles } from "./context/ignore.ts";
-import { reviewSystemPrompt } from "./llm/prompt.ts";
+import { MAX_REJECTED_CHARS, reviewSystemPrompt } from "./llm/prompt.ts";
 import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
@@ -40,6 +41,12 @@ export interface RunReviewInput {
   warnings?: string[];
   // Linked and candidate issues for the walkthrough, fetched by the caller.
   issues?: WalkthroughIssues;
+  // Fingerprints this team dismissed on this change: a match is dropped before
+  // it can be reported again. Fetched by the caller (see worker/runJob.ts).
+  ignoredFingerprints?: ReadonlySet<string>;
+  // Recent repo-wide dismissals, listed in the prompt so the model learns what
+  // this team rejects. Fetched by the caller.
+  rejectedFindings?: RejectedFinding[];
 }
 
 // Omissions that mean the change was not fully reviewed. Ignored, binary and
@@ -51,9 +58,11 @@ const INCOMPLETE: ReadonlySet<OmissionReason> = new Set([
   "chunk_failed",
 ]);
 
-// The title, description and guidance are bounded but not counted exactly, so
-// they get a generous fixed allowance next to the measured system prompt.
-const USER_PROMPT_ALLOWANCE = 3_000;
+// The title, description, guidance and previously-rejected list are bounded but
+// not counted exactly, so they get a generous fixed allowance next to the
+// measured system prompt. The last term covers the rejected section (its
+// MAX_REJECTED_CHARS at ~4 chars/token) so it cannot crowd out the diff.
+const USER_PROMPT_ALLOWANCE = 3_000 + Math.ceil(MAX_REJECTED_CHARS / 4);
 
 function lineCounts(changeSet: ChangeSet): ReviewResult["files"] {
   return changeSet.files.map((file) => {
@@ -132,7 +141,10 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   let failedPasses = 0;
   const outcomes = await mapLimit(chunks, deps.concurrency ?? 3, async (chunk) => {
     try {
-      return { chunk, review: await reviewChunk(deps.generate, changeSet, chunk, chunks.length, config) };
+      return {
+        chunk,
+        review: await reviewChunk(deps.generate, changeSet, chunk, chunks.length, config, input.rejectedFindings),
+      };
     } catch (err) {
       return { chunk, error: errorMessage(err) };
     }
@@ -161,6 +173,7 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     changeSet,
     reviewable.filter((file) => succeeded.some((part) => part.file === file)),
     config,
+    input.ignoredFingerprints,
   );
   // After validation, so only findings that would be published are checked,
   // and before the verdict, so a refuted blocker cannot fail the status.
@@ -171,6 +184,7 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     config,
     generate: deps.generate,
     concurrency: deps.concurrency ?? 3,
+    ignoredFingerprints: input.ignoredFingerprints,
   });
   usage.push(...verified.usage);
   warnings.push(...verified.warnings);

@@ -57,6 +57,10 @@ const reviewShape = {
   minConfidence: z.number().min(0).max(1),
   // A critical or major model finding without evidence is demoted, not blocking.
   requireEvidence: z.boolean(),
+  // Feed back findings this team dismissed as false positives or intentional:
+  // an ignored finding is never reposted on the same change, and recent repo
+  // ignores are listed in the prompt so the model does not raise them again.
+  suppressIgnored: z.boolean(),
   // Allow findings on lines the change did not touch.
   fullFile: z.boolean(),
   committableSuggestions: z.boolean(),
@@ -191,6 +195,7 @@ export const DEFAULT_CONFIG: Config = {
     maxChunks: 12,
     minConfidence: 0.5,
     requireEvidence: true,
+    suppressIgnored: true,
     fullFile: false,
     committableSuggestions: true,
     disableCache: false,

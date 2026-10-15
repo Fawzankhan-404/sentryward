@@ -1,10 +1,10 @@
 import { env } from "../config/env.ts";
-import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
+import type { ForgeConnection, IgnoreReason, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { skipFilterReason } from "../review/config/filters.ts";
 import { loadDashboardConfig, loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
-import type { ChangeSet } from "../review/core/models.ts";
+import type { ChangeSet, RejectedFinding } from "../review/core/models.ts";
 import type { ContextSource } from "../review/context/gather.ts";
 import { cacheKey, cached, forgeCache, type ForgeCache } from "../review/forge/cache.ts";
 import { searchTerms } from "../review/forge/issues.ts";
@@ -28,6 +28,10 @@ import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
 import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
 import { syncFindings } from "./syncFindings.ts";
+
+// How many recent dismissals to feed into the review prompt; bounded so a noisy
+// repository cannot grow the prompt without limit.
+const MAX_REJECTED_FINDINGS = 20;
 
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
@@ -262,6 +266,34 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
       ),
     searchCode: (term) => forge.searchCode(repo.fullPath, term, ref.headSha),
   };
+  // Findings this team dismissed as false positives or deliberate: never repost
+  // them on this change, and tell the model what the repo has recently rejected.
+  // fix_later / not_specified are not suppression signals.
+  let ignoredFingerprints: Set<string> | undefined;
+  let rejectedFindings: RejectedFinding[] | undefined;
+  if (config.review.suppressIgnored) {
+    const dismissed = { in: ["false_positive", "intentional"] satisfies IgnoreReason[] };
+    const [sameChange, recent] = await Promise.all([
+      prisma.finding.findMany({
+        where: { repositoryId: repo.id, number: job.number, state: "ignored", ignoreReason: dismissed },
+        select: { fingerprint: true },
+      }),
+      prisma.finding.findMany({
+        where: { repositoryId: repo.id, state: "ignored", ignoreReason: dismissed },
+        orderBy: { ignoredAt: "desc" },
+        take: MAX_REJECTED_FINDINGS,
+        select: { title: true, category: true, file: true, ignoreNote: true },
+      }),
+    ]);
+    ignoredFingerprints = new Set(sameChange.map((row) => row.fingerprint));
+    rejectedFindings = recent.map((row) => ({
+      title: row.title,
+      category: row.category,
+      file: row.file,
+      ...(row.ignoreNote ? { note: row.ignoreNote } : {}),
+    }));
+  }
+
   let result;
   try {
     result = await runReview(
@@ -274,6 +306,8 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
         },
         warnings,
         issues,
+        ignoredFingerprints,
+        rejectedFindings,
       },
       { generate: watch ? abortableGenerate(generate, watch.signal) : generate, context },
     );

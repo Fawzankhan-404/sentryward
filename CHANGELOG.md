@@ -16,6 +16,13 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
   changes, read at the head revision. Context only uses budget the diff left,
   never causes an omission, and a failed read only adds a warning.
   `review.file_context` (on by default) turns it off.
+- Findings dismissed as a false positive or as intentional are no longer
+  reported again on the same PR/MR, including after verification demotes a
+  finding onto a dismissed one. Recent dismissals from the repository are also
+  listed in the review prompt (bounded, and treated as untrusted text) so the
+  same false positive is less likely on later PRs. "Fix later" and "not
+  specified" dismissals are not used. `review.suppress_ignored` (on by default)
+  turns it off, from the dashboard or `.sentryward.yaml`.
 
 ### Fixed
 

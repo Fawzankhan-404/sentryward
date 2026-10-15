@@ -5,6 +5,7 @@ import { estimateTokens } from "../src/review/context/budget.ts";
 import type { ContextSource } from "../src/review/context/gather.ts";
 import { repairVerificationOutput, verificationOutputSchema } from "../src/review/llm/schemas.ts";
 import type { ModelFinding } from "../src/review/llm/schemas.ts";
+import { fingerprint } from "../src/review/core/fingerprint.ts";
 import { runReview } from "../src/review/pipeline.ts";
 import { toMarkdown } from "../src/review/render/markdown.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
@@ -53,6 +54,20 @@ describe("verifying findings", () => {
     expect(result.findings[0]!.fingerprint).not.toBe(confirmed.result.findings[0]!.fingerprint);
     expect(result.validation.demoted).toBe(1);
     expect(result.verdict.verdict).toBe("pass");
+  });
+
+  it("suppresses an uncertain finding whose demoted fingerprint this team dismissed", async () => {
+    // The dismissal was stored as a verification_needed finding, so it does not
+    // match until verification demotes this one onto the same fingerprint.
+    const demoted = fingerprint({ file: "src/app.ts", category: "bug", kind: "verification_needed", title: "b overflows for large a" });
+    const model = fakeModel({ code_review: { findings: [BLOCKER] }, verification: { verdict: "uncertain", reason: "" } });
+    const result = await runReview(
+      { changeSet: makeChangeSet(), config: config({ review: { severityFloor: "info" } }), ignoredFingerprints: new Set([demoted]) },
+      { generate: model.generate, now },
+    );
+
+    expect(result.findings).toEqual([]);
+    expect(result.validation.dropped).toEqual({ previously_ignored: 1 });
   });
 
   it("drops an uncertain finding the demotion takes below the floor", async () => {

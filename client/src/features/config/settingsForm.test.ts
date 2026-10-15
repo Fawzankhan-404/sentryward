@@ -23,6 +23,7 @@ const schema: ConfigSchema = {
       maxChunks: 12,
       minConfidence: 0.5,
       requireEvidence: true,
+      suppressIgnored: true,
       fullFile: false,
       committableSuggestions: true,
       disableCache: false,
