@@ -34,6 +34,7 @@ export interface ConfigOverride {
     fullFile?: boolean
     committableSuggestions?: boolean
     disableCache?: boolean
+    fileContext?: boolean
   }
   output?: {
     walkthrough?: boolean
@@ -101,6 +102,7 @@ export interface EffectiveConfig {
     fullFile: boolean
     committableSuggestions: boolean
     disableCache: boolean
+    fileContext: boolean
   }
   output: {
     walkthrough: boolean

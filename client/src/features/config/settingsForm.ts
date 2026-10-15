@@ -8,6 +8,7 @@ export const FLAGS = [
   { name: "fullFile", section: "review" },
   { name: "committableSuggestions", section: "review" },
   { name: "disableCache", section: "review" },
+  { name: "fileContext", section: "review" },
   { name: "walkthrough", section: "output" },
   { name: "postInline", section: "output" },
   { name: "postSummary", section: "output" },

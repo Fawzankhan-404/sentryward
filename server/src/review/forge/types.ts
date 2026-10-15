@@ -58,7 +58,12 @@ export interface ForgeAdapter {
   getLinkedIssues(change: ChangeSet): Promise<IssueContext[]>;
   // Issues matching any of the terms, at most MAX_CANDIDATE_ISSUES.
   searchIssues(project: string, terms: string[]): Promise<IssueContext[]>;
+  // Paths of files mentioning `term`, best match first, at most
+  // MAX_CODE_SEARCH_RESULTS. `ref` is honoured where the forge can search one.
+  searchCode(project: string, term: string, ref: string): Promise<string[]>;
 }
+
+export const MAX_CODE_SEARCH_RESULTS = 20;
 
 // Webhooks Sentryward registers on one repository, for forges (or connection kinds)
 // that do not deliver events through an app.

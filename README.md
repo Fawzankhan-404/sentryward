@@ -327,6 +327,8 @@ Turn the first three off with `output.post_inline`, `output.post_summary` and `o
 
 The worker keeps a small in-memory cache of what a commit fixes: the repository config file at the base revision and the change's diff for a given base and head. Reruns of the same head skip those forge calls; titles, descriptions, labels and state are always read fresh. `review.disable_cache` turns it off. Set in the dashboard it covers every read; set in `.sentryward.yaml` the diff is fetched again once the file has been read.
 
+With `review.file_context` (the default), each review pass also sees read-only code around the diff, read from the head revision: the enclosing function or class of each hunk, the file's imports, the definitions of functions the diff calls through relative imports, and call sites of functions it changes in files the change does not touch. Head files go through the same cache; caller lookups use the forge's code search (GitHub only indexes the default branch, GitLab searches the head) and are never cached. Context only fills what a pass has left once its diff is planned, so it never displaces a hunk or makes a review partial, and a file or search that cannot be read only costs a warning. Findings on context lines are dropped unless `review.full_file` is on.
+
 ## Review configuration
 
 Settings resolve in this order, highest first:
@@ -380,6 +382,7 @@ review:
   full_file: false          # allow findings on lines the change did not touch
   committable_suggestions: true
   disable_cache: false      # fetch the diff and config file fresh on every run
+  file_context: true        # show passes the surrounding code, definitions and callers
 output:
   walkthrough: true
   post_inline: true

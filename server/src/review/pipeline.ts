@@ -10,8 +10,10 @@ import {
   type ReviewStatus,
   type Walkthrough,
 } from "./core/models.ts";
-import { estimateTokens, diffTokenBudget } from "./context/budget.ts";
-import { planChunks } from "./context/chunk.ts";
+import { mapLimit } from "./core/mapLimit.ts";
+import { contextTokenBudget, estimateTokens, diffTokenBudget } from "./context/budget.ts";
+import { planChunks, type Chunk } from "./context/chunk.ts";
+import { gatherContext, type ContextSource } from "./context/gather.ts";
 import { classifyFiles } from "./context/ignore.ts";
 import { reviewSystemPrompt } from "./llm/prompt.ts";
 import type { Generate } from "./llm/providers.ts";
@@ -25,6 +27,9 @@ export interface ReviewDeps {
   now?: () => Date;
   // Passes run concurrently up to this many at once.
   concurrency?: number;
+  // Surrounding code for each pass, when review.fileContext is on. Absent
+  // means the passes see the diff alone.
+  context?: ContextSource;
 }
 
 export interface RunReviewInput {
@@ -48,19 +53,6 @@ const INCOMPLETE: ReadonlySet<OmissionReason> = new Set([
 // The title, description and guidance are bounded but not counted exactly, so
 // they get a generous fixed allowance next to the measured system prompt.
 const USER_PROMPT_ALLOWANCE = 3_000;
-
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
 
 function lineCounts(changeSet: ChangeSet): ReviewResult["files"] {
   return changeSet.files.map((file) => {
@@ -116,11 +108,30 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
         )
       : Promise.resolve(undefined);
 
+  // Gathered after planning, into whatever budget each pass has left, so it
+  // can never cost the diff a hunk.
+  let chunks: Chunk[] = plan.chunks;
+  if (config.review.fileContext && deps.context && chunks.length > 0) {
+    try {
+      const gathered = await gatherContext({
+        chunks,
+        changeSet,
+        source: deps.context,
+        budgetFor: (chunk) => contextTokenBudget(config, overhead, chunk.tokens),
+        concurrency: deps.concurrency ?? 3,
+      });
+      chunks = chunks.map((chunk, index) => ({ ...chunk, context: gathered.contexts[index] ?? "" }));
+      warnings.push(...gathered.warnings);
+    } catch (err) {
+      warnings.push(`Review context failed, the diff was reviewed without it: ${errorMessage(err)}`);
+    }
+  }
+
   const raw: ModelFinding[] = [];
   let failedPasses = 0;
-  const outcomes = await mapLimit(plan.chunks, deps.concurrency ?? 3, async (chunk) => {
+  const outcomes = await mapLimit(chunks, deps.concurrency ?? 3, async (chunk) => {
     try {
-      return { chunk, review: await reviewChunk(deps.generate, changeSet, chunk, plan.chunks.length, config) };
+      return { chunk, review: await reviewChunk(deps.generate, changeSet, chunk, chunks.length, config) };
     } catch (err) {
       return { chunk, error: errorMessage(err) };
     }

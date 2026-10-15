@@ -11,7 +11,10 @@ export interface Chunk {
   index: number;
   parts: ChunkPart[];
   text: string;
+  // Diff tokens only; read-only surrounding code is added after planning.
   tokens: number;
+  // Rendered CONTEXT blocks for this pass, empty when there are none.
+  context: string;
 }
 
 export interface ChunkPlan {
@@ -82,7 +85,7 @@ export function planChunks(files: ChangedFile[], budget: number, maxChunks: numb
   const close = () => {
     if (!parts.length) return;
     const text = texts.join("\n\n");
-    chunks.push({ index: chunks.length + 1, parts, text, tokens: estimateTokens(text) });
+    chunks.push({ index: chunks.length + 1, parts, text, tokens: estimateTokens(text), context: "" });
     parts = [];
     texts = [];
     tokens = 0;

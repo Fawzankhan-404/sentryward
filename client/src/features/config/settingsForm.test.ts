@@ -26,6 +26,7 @@ const schema: ConfigSchema = {
       fullFile: false,
       committableSuggestions: true,
       disableCache: false,
+      fileContext: true,
     },
     output: {
       walkthrough: true,

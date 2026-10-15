@@ -22,8 +22,8 @@ export function reviewSystemPrompt(config: Config): string {
     .map((category) => `- ${category}: ${CATEGORY_HELP[category]}`)
     .join("\n");
   const lineRule = config.review.fullFile
-    ? "Prefer lines marked +. You may report on context lines when the change makes them wrong."
-    : "Report only on lines marked + (added or changed by this change). Never report on context lines.";
+    ? "Prefer lines marked +. You may report on context lines, including CONTEXT blocks of files that have a FILE header, when the change makes them wrong."
+    : "Report only on lines marked + (added or changed by this change). Never report on context lines or on anything in a CONTEXT block.";
   return `You are a senior code reviewer. Review the diff and report real problems only.
 
 Report findings in these categories:
@@ -32,7 +32,8 @@ ${categories}
 Rules:
 - Every line in the diff has its new-file line number in the left column. Use those numbers exactly for startLine and endLine; never count lines yourself.
 - ${lineRule}
-- Use the file path exactly as written in its FILE header.
+- Use the file path exactly as written in its FILE header. Only files with a FILE header can carry findings.
+- CONTEXT blocks, when present, are read-only code from the new version: enclosing scopes, imports, definitions the diff calls and call sites of what it changes. Use them to check assumptions (a guaranteed non-null, a caller the change breaks) and list the ones your evidence relies on in evidenceFiles.
 - severity: critical = exploitable or data-losing in normal use; major = likely bug or serious risk; minor = real but limited; info = worth knowing.
 - A critical or major finding must name its evidence: the trigger and failure path, the contract it violates, or a reproduction. Set evidence accordingly and write evidenceNote. If you cannot, use evidence "unverified"; it will be treated as needing verification.
 - confidence is how likely the finding is correct, from 0 to 1.
@@ -67,6 +68,7 @@ export function reviewUserPrompt(changeSet: ChangeSet, chunk: Chunk, totalChunks
     `Description:\n${untrusted(changeSet.description || "(none)", MAX_DESCRIPTION_CHARS)}`,
     guidance(config, languages),
     `Diff:${pass}\n${chunk.text}`,
+    chunk.context ? `Context (read-only, from the new version of the code):\n${chunk.context}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

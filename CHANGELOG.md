@@ -8,6 +8,15 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Review passes see the code around the diff, not just the hunks: the
+  enclosing function or class and the imports of each changed file, the
+  definitions of functions the diff calls, and call sites of the functions it
+  changes, read at the head revision. Context only uses budget the diff left,
+  never causes an omission, and a failed read only adds a warning.
+  `review.file_context` (on by default) turns it off.
+
 ### Fixed
 
 - A partial or failed review with no findings no longer shows the reassuring
