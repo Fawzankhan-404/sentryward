@@ -84,6 +84,7 @@ interface Published {
   statuses: string[];
   descriptions: string[];
   labels: string[][];
+  threads: { fingerprints: string[]; resolved: boolean }[];
 }
 
 function deps(
@@ -101,7 +102,7 @@ function deps(
   } = {},
 ) {
   const reads: string[] = [];
-  const published: Published = { inline: [], summaries: [], statuses: [], descriptions: [], labels: [] };
+  const published: Published = { inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] };
   const forge = {
     getChange: async (_p: string, _n: number, cache?: ForgeCache) => {
       reads.push(cache ? "change:cached" : "change");
@@ -155,6 +156,10 @@ function deps(
     },
     setCommitStatus: async (_ref: unknown, status: { state: string }) => {
       published.statuses.push(status.state);
+    },
+    setThreadsResolved: async (_ref: unknown, fingerprints: string[], resolved: boolean) => {
+      published.threads.push({ fingerprints, resolved });
+      return { updated: fingerprints, failed: [] };
     },
   } as unknown as Forge;
   const model = fakeModel(answers);
@@ -351,6 +356,29 @@ describe("runJob", () => {
     expect(await prisma.postedFinding.count()).toBe(1);
   });
 
+  it("resolves the thread of a fixed finding and reopens it when the finding returns", async () => {
+    const found = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+    const clean = { code_review: { findings: [] }, walkthrough: WALKTHROUGH };
+    const first = deps({}, found);
+    await runJob(await claimedJob(), first.runDeps);
+    const print = first.published.inline[0]!.fingerprint;
+    expect(first.published.threads).toEqual([]);
+
+    const fixed = deps({}, clean);
+    await enqueue({ repositoryId, number: 42, headSha: "fixed", trigger: "manual" });
+    const fixedJob = (await claimNext())!;
+    await runJob(fixedJob, fixed.runDeps);
+    expect(fixed.published.threads).toEqual([{ fingerprints: [print], resolved: true }]);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: fixedJob.id } });
+    expect(stored.publication).toMatchObject({ threadsResolved: [print], threadsReopened: [] });
+    expect(await prisma.finding.findFirst({ where: { fingerprint: print } })).toMatchObject({ state: "resolved" });
+
+    const back = deps({}, found);
+    await enqueue({ repositoryId, number: 42, headSha: "back", trigger: "manual" });
+    await runJob((await claimNext())!, back.runDeps);
+    expect(back.published.threads).toEqual([{ fingerprints: [print], resolved: false }]);
+  });
+
   it("trusts markers already on the forge when the database has no row", async () => {
     const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
     const first = deps({}, answers);
@@ -407,7 +435,7 @@ describe("runJob", () => {
 
     await runJob(job, runDeps);
 
-    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] });
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toBeNull();
   });
@@ -426,7 +454,7 @@ describe("runJob when the change closes", () => {
     expect(stored).toMatchObject({ status: "cancelled", verdict: null, error: "The pull or merge request was closed or merged" });
     expect(stored.resolvedConfig).toMatchObject({ config: { triggers: { abortOnClose: true } } });
     expect(model.requests).toHaveLength(0);
-    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] });
   });
 
   it("publishes nothing when the change closes during the review", async () => {
@@ -657,6 +685,6 @@ describe("runJob with automatic triggers", () => {
     expect(stored).toMatchObject({ status: "skipped", verdict: null, result: null });
     expect(stored.error).toMatch(/turned off/);
     expect(model.requests).toHaveLength(0);
-    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] });
   });
 });

@@ -37,6 +37,7 @@ const effective = {
     postInline: true,
     postSummary: true,
     postCheck: true,
+    resolveFixedThreads: true,
     reviewStats: true,
     agentPrompts: true,
     agentPromptAll: true,

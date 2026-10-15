@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../src/app.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import type { ReviewResult } from "../src/review/core/models.ts";
-import { syncFindings } from "../src/worker/syncFindings.ts";
+import { findingTransitions, syncFindings } from "../src/worker/syncFindings.ts";
 import { sampleResult } from "./helpers/result.ts";
 import { createUser } from "./helpers/users.ts";
 
@@ -108,6 +108,34 @@ describe("syncFindings", () => {
   it("ignores a failed run", async () => {
     await sync({ ...base, status: "failed" });
     expect(await rows()).toHaveLength(0);
+  });
+});
+
+describe("findingTransitions", () => {
+  const row = (fingerprint: string, state: string, file: string) => ({ fingerprint, state, file });
+
+  it("resolves open findings no longer reported in a reviewed file and reopens returning ones", () => {
+    const [kept, back] = base.findings;
+    const file = base.findings[0]!.file;
+    const existing = [
+      row(kept!.fingerprint, "open", kept!.file),
+      row(back!.fingerprint, "resolved", back!.file),
+      row("ffffffffffffffff", "open", file),
+      row("eeeeeeeeeeeeeeee", "open", "gone/from/the/change.ts"),
+      row("dddddddddddddddd", "ignored", file),
+    ];
+    expect(findingTransitions(existing, base)).toEqual({
+      resolved: ["ffffffffffffffff", "eeeeeeeeeeeeeeee"],
+      reopened: [back!.fingerprint],
+    });
+  });
+
+  it("says nothing about a file the run skipped, or for a failed run", () => {
+    const file = base.findings[0]!.file;
+    const existing = [row("ffffffffffffffff", "open", file)];
+    const skipped = { ...base, coverage: { ...base.coverage, reviewedFiles: base.coverage.reviewedFiles.filter((f) => f !== file) } };
+    expect(findingTransitions(existing, skipped).resolved).toEqual([]);
+    expect(findingTransitions(existing, { ...base, status: "failed" })).toEqual({ resolved: [], reopened: [] });
   });
 });
 

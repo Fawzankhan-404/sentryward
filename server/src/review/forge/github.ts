@@ -6,6 +6,7 @@ import { cacheKey, cached, type ForgeCache } from "./cache.ts";
 import { githubApiBase } from "./githubApp.ts";
 import { closingIssueNumbers, MAX_CANDIDATE_ISSUES } from "./issues.ts";
 import {
+  hostOrigin,
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
   MAX_CODE_SEARCH_RESULTS,
@@ -20,6 +21,7 @@ import {
   type HookTarget,
   type InlineComment,
   type InlineResult,
+  type ThreadResult,
 } from "./types.ts";
 
 export interface GitHubAdapterOptions {
@@ -122,6 +124,43 @@ interface GhComment {
   id: number;
   body: string;
   user: { login: string } | null;
+}
+
+interface GhThread {
+  id: string;
+  isResolved: boolean;
+  comments: { nodes: { body: string; author: { login: string } | null }[] };
+}
+
+interface GhThreadPage {
+  repository: {
+    pullRequest: {
+      reviewThreads: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: GhThread[] };
+    } | null;
+  } | null;
+}
+
+const REVIEW_THREADS = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isResolved comments(first: 1) { nodes { body author { login } } } }
+      }
+    }
+  }
+}`;
+
+const RESOLVE_THREAD = `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
+const UNRESOLVE_THREAD = `mutation($id: ID!) { unresolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
+
+// Review threads are read 100 at a time; a PR with more than this many is
+// not one a run could usefully tidy up anyway.
+const MAX_THREAD_PAGES = 10;
+
+// REST names an app "<slug>[bot]", GraphQL just "<slug>".
+function botless(login: string): string {
+  return login.replace(/\[bot\]$/, "");
 }
 
 function reviewComment(comment: InlineComment) {
@@ -410,6 +449,53 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
       }),
     });
+  }
+
+  // Threads can only be resolved through GraphQL. GitHub Enterprise serves it
+  // beside the REST API rather than under it.
+  private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const url = this.host === "github.com" ? "/graphql" : `${hostOrigin(this.host)}/api/graphql`;
+    const res = await this.http.json<{ data?: T; errors?: { message: string }[] }>(url, {
+      method: "POST",
+      body: JSON.stringify({ query, variables }),
+    });
+    // GraphQL reports most failures with a 200.
+    if (res.errors?.length || !res.data) {
+      throw new ForgeError(502, `GraphQL request failed: ${res.errors?.map((e) => e.message).join("; ") ?? "no data"}`);
+    }
+    return res.data;
+  }
+
+  async setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult> {
+    const result: ThreadResult = { updated: [], failed: [] };
+    if (fingerprints.length === 0) return result;
+    const [owner, name] = ref.project.split("/");
+    const self = this.options.selfLogin ? botless(this.options.selfLogin) : undefined;
+    const wanted = new Set(fingerprints);
+    const threads = new Map<string, string>();
+    let after: string | null = null;
+    for (let page = 0; page < MAX_THREAD_PAGES; page++) {
+      const data: GhThreadPage = await this.graphql<GhThreadPage>(REVIEW_THREADS, { owner, name, number: ref.number, after });
+      const connection = data.repository?.pullRequest?.reviewThreads;
+      if (!connection) break;
+      for (const thread of connection.nodes) {
+        const first = thread.comments.nodes[0];
+        if (!first || !self || !first.author || botless(first.author.login) !== self) continue;
+        if (thread.isResolved === resolved) continue;
+        for (const print of markersIn(first.body)) if (wanted.has(print)) threads.set(print, thread.id);
+      }
+      if (!connection.pageInfo.hasNextPage) break;
+      after = connection.pageInfo.endCursor;
+    }
+    for (const [fingerprint, id] of threads) {
+      try {
+        await this.graphql(resolved ? RESOLVE_THREAD : UNRESOLVE_THREAD, { id });
+        result.updated.push(fingerprint);
+      } catch (err) {
+        result.failed.push({ fingerprint, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return result;
   }
 
   async createHook(repo: HookTarget, url: string, secret: string): Promise<string> {

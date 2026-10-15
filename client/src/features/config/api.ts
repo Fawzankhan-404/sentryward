@@ -44,6 +44,7 @@ export interface ConfigOverride {
     postInline?: boolean
     postSummary?: boolean
     postCheck?: boolean
+    resolveFixedThreads?: boolean
     reviewStats?: boolean
     agentPrompts?: boolean
     agentPromptAll?: boolean
@@ -114,6 +115,7 @@ export interface EffectiveConfig {
     postInline: boolean
     postSummary: boolean
     postCheck: boolean
+    resolveFixedThreads: boolean
     reviewStats: boolean
     agentPrompts: boolean
     agentPromptAll: boolean

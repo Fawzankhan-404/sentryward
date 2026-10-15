@@ -9,15 +9,42 @@ export interface SyncFindingsInput {
   result: ReviewResult;
 }
 
-// Brings the change's findings table in step with one run's result. A finding
-// is resolved only when this run actually read its file (or the file left the
-// change); a partial run that skipped the file for budget says nothing about it.
-// Ignoring is the user's call, so no run undoes it.
+export interface FindingRow {
+  fingerprint: string;
+  state: string;
+  file: string;
+}
+
+export interface FindingTransitions {
+  // Open findings this run no longer reports.
+  resolved: string[];
+  // Resolved findings this run reports again.
+  reopened: string[];
+}
+
+// Which findings one run moves between open and resolved. A finding is resolved
+// only when this run actually read its file (or the file left the change); a
+// partial run that skipped the file for budget says nothing about it. Ignoring
+// is the user's call, so no run undoes it. The publisher resolves forge threads
+// from the same answer before the rows are written, so the two cannot disagree.
+export function findingTransitions(existing: FindingRow[], result: ReviewResult): FindingTransitions {
+  if (result.status === "failed") return { resolved: [], reopened: [] };
+  const reviewed = new Set(result.coverage.reviewedFiles);
+  const changed = new Set(result.files.map((file) => file.path));
+  const reported = new Set(result.findings.map((finding) => finding.fingerprint));
+  return {
+    resolved: existing
+      .filter((row) => row.state === "open" && !reported.has(row.fingerprint))
+      .filter((row) => reviewed.has(row.file) || !changed.has(row.file))
+      .map((row) => row.fingerprint),
+    reopened: existing.filter((row) => row.state === "resolved" && reported.has(row.fingerprint)).map((row) => row.fingerprint),
+  };
+}
+
+// Brings the change's findings table in step with one run's result.
 export async function syncFindings({ repositoryId, number, jobId, author, result }: SyncFindingsInput): Promise<void> {
   if (result.status === "failed") return;
   const now = new Date();
-  const reviewed = new Set(result.coverage.reviewedFiles);
-  const changed = new Set(result.files.map((file) => file.path));
   // A run can report the same fingerprint twice (overlapping chunks); one row each.
   const reported = new Map(result.findings.map((finding) => [finding.fingerprint, finding]));
 
@@ -52,12 +79,12 @@ export async function syncFindings({ repositoryId, number, jobId, author, result
       }
     }
 
-    const gone = existing
-      .filter((row) => row.state === "open" && !reported.has(row.fingerprint))
-      .filter((row) => reviewed.has(row.file) || !changed.has(row.file))
-      .map((row) => row.id);
-    if (gone.length) {
-      await tx.finding.updateMany({ where: { id: { in: gone } }, data: { state: "resolved", resolvedAt: now } });
+    const { resolved } = findingTransitions(existing, result);
+    if (resolved.length) {
+      await tx.finding.updateMany({
+        where: { repositoryId, number, fingerprint: { in: resolved } },
+        data: { state: "resolved", resolvedAt: now },
+      });
     }
   });
 }

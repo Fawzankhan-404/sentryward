@@ -14,6 +14,9 @@ export interface PublishInput {
   config: Config;
   // Fingerprints already posted on this change, from the database.
   postedFingerprints: Set<string>;
+  // Findings this run moves to resolved, or back to open (findingTransitions).
+  resolvedFingerprints?: string[];
+  reopenedFingerprints?: string[];
   // Where the commit status links: the review in the dashboard.
   targetUrl?: string;
 }
@@ -28,6 +31,9 @@ export interface Publication {
   // "description", from before it moved into the review comment.
   walkthroughLocation?: "description" | "comment" | null;
   labels?: string[];
+  // Inline threads this run resolved or reopened, by fingerprint.
+  threadsResolved?: string[];
+  threadsReopened?: string[];
   errors: string[];
 }
 
@@ -49,6 +55,8 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
     statusState: null,
     walkthroughLocation: null,
     labels: [],
+    threadsResolved: [],
+    threadsReopened: [],
     errors: [],
   };
   const placement = summaryPlacement(config, result);
@@ -90,6 +98,28 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
       }
     } catch (err) {
       publication.errors.push(`Inline comments failed: ${message(err)}`);
+    }
+  }
+
+  // Threads follow the findings table: only what this run resolved or brought
+  // back is touched, so a thread someone resolved or reopened by hand stays so.
+  if (config.output.postInline && config.output.resolveFixedThreads) {
+    const steps = [
+      { prints: input.resolvedFingerprints ?? [], resolved: true, verb: "resolved" },
+      { prints: input.reopenedFingerprints ?? [], resolved: false, verb: "reopened" },
+    ] as const;
+    for (const step of steps) {
+      if (step.prints.length === 0) continue;
+      try {
+        const outcome = await publisher.setThreadsResolved(ref, step.prints, step.resolved);
+        if (step.resolved) publication.threadsResolved = outcome.updated;
+        else publication.threadsReopened = outcome.updated;
+        if (outcome.failed.length) {
+          publication.errors.push(`${outcome.failed.length} inline thread(s) could not be ${step.verb}`);
+        }
+      } catch (err) {
+        publication.errors.push(`Inline threads could not be ${step.verb}: ${message(err)}`);
+      }
     }
   }
 

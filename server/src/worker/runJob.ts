@@ -27,7 +27,7 @@ import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
 import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
-import { syncFindings } from "./syncFindings.ts";
+import { findingTransitions, syncFindings } from "./syncFindings.ts";
 
 // How many recent dismissals to feed into the review prompt; bounded so a noisy
 // repository cannot grow the prompt without limit.
@@ -322,16 +322,26 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
 
   let publication = null;
   if (publishes(config)) {
-    const already = await prisma.postedFinding.findMany({
-      where: { repositoryId: repo.id, number: job.number },
-      select: { fingerprint: true },
-    });
+    const [already, findings] = await Promise.all([
+      prisma.postedFinding.findMany({
+        where: { repositoryId: repo.id, number: job.number },
+        select: { fingerprint: true },
+      }),
+      prisma.finding.findMany({
+        where: { repositoryId: repo.id, number: job.number },
+        select: { fingerprint: true, state: true, file: true },
+      }),
+    ]);
+    // The same answer syncFindings writes after the job is stored.
+    const transitions = findingTransitions(findings, result);
     publication = await publishReview({
       publisher: forge,
       changeSet,
       result,
       config,
       postedFingerprints: new Set(already.map((row) => row.fingerprint)),
+      resolvedFingerprints: transitions.resolved,
+      reopenedFingerprints: transitions.reopened,
       targetUrl,
     });
     if (publication.inlinePosted.length) {

@@ -21,6 +21,7 @@ import {
   type HookTarget,
   type InlineComment,
   type InlineResult,
+  type ThreadResult,
 } from "./types.ts";
 
 export interface GitLabAdapterOptions {
@@ -117,6 +118,8 @@ interface GlNote {
   body: string;
   system: boolean;
   author: { username: string };
+  // Set on notes in a resolvable discussion, such as a diff thread.
+  resolved?: boolean;
 }
 
 interface GlDiscussion {
@@ -340,14 +343,41 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return result;
   }
 
-  async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
+  // Discussions Sentryward opened: the first note is its own.
+  private async ownDiscussions(ref: ForgeRef): Promise<GlDiscussion[]> {
     const discussions = await this.http.paginate<GlDiscussion>(
       `${this.mergeRequest(ref)}/discussions?per_page=100`,
       nextPage,
     );
-    return new Set(
-      discussions.flatMap((d) => d.notes.slice(0, 1)).filter((n) => this.isSelf(n)).flatMap((n) => markersIn(n.body)),
-    );
+    return discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0]));
+  }
+
+  async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
+    const discussions = await this.ownDiscussions(ref);
+    return new Set(discussions.flatMap((d) => markersIn(d.notes[0]!.body)));
+  }
+
+  async setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult> {
+    const result: ThreadResult = { updated: [], failed: [] };
+    if (fingerprints.length === 0) return result;
+    const wanted = new Set(fingerprints);
+    for (const discussion of await this.ownDiscussions(ref)) {
+      const first = discussion.notes[0]!;
+      // Not a diff thread, or already where it should be.
+      if (first.resolved === undefined || first.resolved === resolved) continue;
+      const print = markersIn(first.body).find((p) => wanted.has(p));
+      if (!print) continue;
+      try {
+        await this.http.request(
+          `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
+          { method: "PUT" },
+        );
+        result.updated.push(print);
+      } catch (err) {
+        result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return result;
   }
 
   upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
