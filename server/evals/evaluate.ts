@@ -74,10 +74,12 @@ export async function evaluateCase(evalCase: EvalCase, generate: Generate, optio
       { generate, context: caseContext(evalCase.dir) },
     );
     const usage = summarizeUsage(result.usage);
-    const costUsd = costOf(result.usage, options.price);
     if (result.status === "failed") {
-      return { ...base, status: "failed", error: result.errors.join("; "), warnings: result.warnings, usage, costUsd };
+      // A call that threw (e.g. on a malformed response) may still have been
+      // billed, and its usage is not in the result, so the cost is unknown.
+      return { ...base, status: "failed", error: result.errors.join("; "), warnings: result.warnings, usage, costUsd: null };
     }
+    const costUsd = costOf(result.usage, options.price);
     return {
       ...base,
       status: result.status,

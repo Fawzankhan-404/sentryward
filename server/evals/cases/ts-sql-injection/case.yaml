@@ -7,6 +7,6 @@ expected:
     category: security
     description: the search term from the query string is interpolated into the SQL text (SQL injection)
 traps:
-  - file: src/products/repository.ts
-    lines: [12, 12]
-    note: ${TABLE} is a module constant and the id is bound as $1
+  - file: src/products/routes.ts
+    lines: [6, 6]
+    note: /search is registered before /:id, so it is not captured as an id

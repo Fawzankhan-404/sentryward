@@ -214,14 +214,17 @@ describe("corpus", () => {
     expect(corpus.filter((c) => c.expected.length > 0).length).toBeGreaterThanOrEqual(10);
   });
 
-  // A range outside every hunk can never be matched (the validator drops
-  // findings there), so the case would silently score zero.
-  it.each(corpus.map((c) => [c.id, c] as const))("%s points only at lines in its diff", (_, evalCase) => {
+  // Ranges have the shape a validated finding can take: the validator moves a
+  // start off an unchanged line onto the nearest added one (or drops the
+  // finding), and keeps an end only inside the start's hunk. A range that
+  // starts on a context line may never be matched, so the case would silently
+  // mis-score.
+  it.each(corpus.map((c) => [c.id, c] as const))("%s starts every range on an added line", (_, evalCase) => {
     for (const range of [...evalCase.expected, ...evalCase.traps]) {
       const file = evalCase.changeSet.files.find((f) => f.path === range.file);
       expect(file, `${range.file} is not in the diff`).toBeDefined();
-      const inHunk = (line: number) => file!.hunks.some((h) => line >= h.newStart && line < h.newStart + h.newLines);
-      expect(inHunk(range.startLine) && inHunk(range.endLine), `${range.file}:${range.startLine}-${range.endLine}`).toBe(true);
+      const hunk = file!.hunks.find((h) => h.addedLines.includes(range.startLine));
+      expect(hunk && hunk.newLineToPosition[String(range.endLine)] !== undefined, `${range.file}:${range.startLine}-${range.endLine}`).toBe(true);
     }
     expect(() => caseConfig(evalCase, "anthropic/claude-sonnet-5-5")).not.toThrow();
   });
@@ -259,9 +262,11 @@ describe("evaluate", () => {
 
     const run = await evaluate([sqlCase], generate, { model: "anthropic/claude-sonnet-5-5", match: DEFAULT_MATCH_OPTIONS, concurrency: 1 });
 
-    expect(run.cases[0]).toMatchObject({ status: "failed", error: expect.stringContaining("rate limited") });
+    // The walkthrough's usage is recorded, but the failed call may have been
+    // billed too, so the cost is unknown rather than the walkthrough's alone.
+    expect(run.cases[0]).toMatchObject({ status: "failed", error: expect.stringContaining("rate limited"), costUsd: null });
     expect(run.cases[0]).not.toHaveProperty("score");
-    expect(run.totals).toMatchObject({ errored: 1, scored: 0, precision: null, recall: null });
+    expect(run.totals).toMatchObject({ errored: 1, scored: 0, precision: null, recall: null, costUsd: null });
   });
 
   it("leaves the cost unknown when a review throws", async () => {

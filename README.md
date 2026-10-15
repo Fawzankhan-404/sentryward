@@ -572,14 +572,17 @@ expected:                          # leave out for a change with nothing to repo
     category: security             # or a list of acceptable categories
     description: search term interpolated into SQL
 traps:                             # code that looks wrong but is not
-  - file: src/products/repository.ts
-    lines: [12, 12]
-    note: TABLE is a constant and the id is bound
+  - file: src/products/routes.ts
+    lines: [6, 6]
+    note: /search is registered before /:id
 config: {}                         # optional camelCase config override, e.g. { review: { categories: [style] } }
 ```
 
 `npm test` checks that every case loads and that each expected and trap range
-lies inside the diff, without calling a model.
+starts on an added line (a finding on an unchanged line is moved to the
+nearest added one), without calling a model. CodeQL scans the fixtures too,
+so a deliberately vulnerable case can raise an alert on its PR; dismiss it as
+"used in tests".
 
 ### Database changes
 
