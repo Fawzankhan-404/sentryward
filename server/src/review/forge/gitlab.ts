@@ -120,6 +120,7 @@ interface GlNote {
   author: { username: string };
   // Set on notes in a resolvable discussion, such as a diff thread.
   resolved?: boolean;
+  resolved_by?: { username: string } | null;
 }
 
 interface GlDiscussion {
@@ -134,10 +135,6 @@ const GITLAB_STATE: Record<CommitState, string> = {
   failure: "failed",
   error: "failed",
 };
-
-// The same cap ForgeHttp.paginate applies by default, named so a cut-off
-// listing can be reported.
-const MAX_DISCUSSION_PAGES = 30;
 
 export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   readonly provider = "gitlab" as const;
@@ -347,20 +344,25 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return result;
   }
 
-  // Discussions Sentryward opened: the first note is its own. `truncated` says
-  // the listing stopped at the page cap with more left.
+  // Discussions Sentryward opened: the first note is its own. Every page is
+  // read: a later run starts from the first page again, so a fixed cap would
+  // leave a discussion past it out of reach for good. `truncated` says the
+  // listing stopped early because the forge's next page did not move.
   private async ownDiscussions(ref: ForgeRef): Promise<{ discussions: GlDiscussion[]; truncated: boolean }> {
-    let more = false;
+    let truncated = false;
     const discussions = await this.http.paginate<GlDiscussion>(
       `${this.mergeRequest(ref)}/discussions?per_page=100`,
       (res, current) => {
         const next = nextPage(res, current);
-        more = next !== null;
+        if (next !== null && next === current) {
+          truncated = true;
+          return null;
+        }
         return next;
       },
-      MAX_DISCUSSION_PAGES,
+      Infinity,
     );
-    return { discussions: discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0])), truncated: more };
+    return { discussions: discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0])), truncated };
   }
 
   async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
@@ -381,6 +383,9 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       seen.add(print);
       // Not a diff thread, or already where it should be.
       if (first.resolved === undefined || first.resolved === resolved) continue;
+      // Only a discussion Sentryward resolved is reopened; one a person
+      // resolved stays resolved.
+      if (!resolved && first.resolved_by?.username !== this.selfLogin) continue;
       try {
         await this.http.request(
           `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
@@ -391,12 +396,12 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
       }
     }
-    // Past the cap a discussion may still exist; reporting it as failed keeps
-    // it pending rather than settled.
+    // A discussion the listing never reached may still exist; reporting it as
+    // failed keeps it pending rather than settled.
     if (truncated) {
       for (const print of wanted) {
         if (!seen.has(print)) {
-          result.failed.push({ fingerprint: print, error: `Not among the first ${MAX_DISCUSSION_PAGES * 100} discussions` });
+          result.failed.push({ fingerprint: print, error: "Discussion listing stopped early" });
         }
       }
     }

@@ -129,6 +129,7 @@ interface GhComment {
 interface GhThread {
   id: string;
   isResolved: boolean;
+  resolvedBy: { login: string } | null;
   comments: { nodes: { body: string; author: { login: string } | null }[] };
 }
 
@@ -145,7 +146,7 @@ const REVIEW_THREADS = `query($owner: String!, $name: String!, $number: Int!, $a
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { id isResolved comments(first: 1) { nodes { body author { login } } } }
+        nodes { id isResolved resolvedBy { login } comments(first: 1) { nodes { body author { login } } } }
       }
     }
   }
@@ -153,10 +154,6 @@ const REVIEW_THREADS = `query($owner: String!, $name: String!, $number: Int!, $a
 
 const RESOLVE_THREAD = `mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
 const UNRESOLVE_THREAD = `mutation($id: ID!) { unresolveReviewThread(input: { threadId: $id }) { thread { id } } }`;
-
-// Review threads are read 100 at a time; a PR with more than this many is
-// not one a run could usefully tidy up anyway.
-const MAX_THREAD_PAGES = 10;
 
 // REST names an app "<slug>[bot]", GraphQL just "<slug>".
 function botless(login: string): string {
@@ -471,38 +468,46 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     if (fingerprints.length === 0) return result;
     const [owner, name] = ref.project.split("/");
     const self = this.options.selfLogin ? botless(this.options.selfLogin) : undefined;
+    const isSelf = (actor: { login: string } | null) => Boolean(self && actor && botless(actor.login) === self);
     const wanted = new Set(fingerprints);
     // Own threads found for a wanted fingerprint, whatever their state, and
     // the ones among them still to move.
     const seen = new Set<string>();
     const threads = new Map<string, string>();
+    // Read until every wanted thread is found or the threads run out: a later
+    // run starts from the first page again, so stopping at a fixed cap would
+    // leave a thread past it out of reach for good.
     let complete = false;
     let after: string | null = null;
-    for (let page = 0; page < MAX_THREAD_PAGES; page++) {
+    for (;;) {
       const data: GhThreadPage = await this.graphql<GhThreadPage>(REVIEW_THREADS, { owner, name, number: ref.number, after });
       const connection = data.repository?.pullRequest?.reviewThreads;
       for (const thread of connection?.nodes ?? []) {
         const first = thread.comments.nodes[0];
-        if (!first || !self || !first.author || botless(first.author.login) !== self) continue;
+        if (!first || !isSelf(first.author)) continue;
         for (const print of markersIn(first.body)) {
           if (!wanted.has(print)) continue;
           seen.add(print);
-          if (thread.isResolved !== resolved) threads.set(print, thread.id);
+          if (thread.isResolved === resolved) continue;
+          // Only a thread Sentryward resolved is reopened; one a person
+          // resolved stays resolved.
+          if (!resolved && !isSelf(thread.resolvedBy)) continue;
+          threads.set(print, thread.id);
         }
       }
       if (!connection?.pageInfo.hasNextPage || seen.size === wanted.size) {
         complete = true;
         break;
       }
+      // A cursor that does not move would loop forever.
+      if (!connection.pageInfo.endCursor || connection.pageInfo.endCursor === after) break;
       after = connection.pageInfo.endCursor;
     }
-    // Past the cap a thread may still exist; reporting it as failed keeps it
-    // pending rather than settled.
+    // A thread the listing never reached may still exist; reporting it as
+    // failed keeps it pending rather than settled.
     if (!complete) {
       for (const print of wanted) {
-        if (!seen.has(print)) {
-          result.failed.push({ fingerprint: print, error: `Not among the first ${MAX_THREAD_PAGES * 100} review threads` });
-        }
+        if (!seen.has(print)) result.failed.push({ fingerprint: print, error: "Review thread listing stopped early" });
       }
     }
     for (const [fingerprint, id] of threads) {
