@@ -1,0 +1,13 @@
+diff --git a/src/projects/routes.ts b/src/projects/routes.ts
+index b150a2b..54183cb 100644
+--- a/src/projects/routes.ts
++++ b/src/projects/routes.ts
+@@ -24,3 +24,8 @@ projects.patch("/:id", requireAuth, async (req, res) => {
+   const name = String(req.body.name ?? project.name);
+   res.json(await prisma.project.update({ where: { id: project.id }, data: { name } }));
+ });
++
++projects.delete("/:id", requireAuth, async (req, res) => {
++  await prisma.project.delete({ where: { id: req.params.id } });
++  res.status(204).end();
++});

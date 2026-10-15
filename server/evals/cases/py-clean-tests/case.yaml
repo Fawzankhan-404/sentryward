@@ -1,0 +1,3 @@
+title: Test slugify
+description: Adds unit tests for slugify.
+language: python

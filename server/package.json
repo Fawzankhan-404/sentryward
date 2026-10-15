@@ -14,6 +14,7 @@
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "eval": "tsx evals/run.ts",
     "test": "DATABASE_URL=$TEST_DATABASE_URL NODE_ENV=test sh -c \"prisma migrate deploy && vitest run\""
   },
   "license": "MIT",

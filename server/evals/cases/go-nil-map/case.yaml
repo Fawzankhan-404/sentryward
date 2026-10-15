@@ -1,0 +1,8 @@
+title: Count events by name
+description: Adds CountByName for the events dashboard.
+language: go
+expected:
+  - file: stats/stats.go
+    lines: [21, 23]
+    category: [bug, reliability]
+    description: counts is a nil map, so the first increment panics (assignment to entry in nil map)

@@ -1,0 +1,11 @@
+diff --git a/app/subscriptions.py b/app/subscriptions.py
+index 8285f65..bff3d81 100644
+--- a/app/subscriptions.py
++++ b/app/subscriptions.py
+@@ -4,4 +4,6 @@ from datetime import datetime, timezone
+ def is_active(subscription):
+     if subscription.cancelled_at is not None:
+         return False
++    if subscription.status is "paused":
++        return False
+     return subscription.current_period_end > datetime.now(timezone.utc)

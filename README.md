@@ -518,6 +518,72 @@ docker compose exec client npm test   # React component and routing tests
 GitHub Actions also runs type checks, client lint, and the client production
 build inside Docker. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete checks.
 
+### Review quality evals
+
+The tests use a fake model, so they say nothing about how good the reviews are.
+`server/evals/` holds a corpus of small changes with the findings a good review
+should report, and a script that reviews each one with a real model and scores
+the result. Use it to tell whether a change to prompts, chunking, context or
+validation helps. It calls the provider's API and costs money, so it is not
+part of `npm test` or CI.
+
+```sh
+# the key must be in the container's environment, e.g. ANTHROPIC_API_KEY in .env for the worker
+docker compose exec worker npm run eval -- --model anthropic/claude-sonnet-5-5
+docker compose exec worker npm run eval -- --model anthropic/claude-sonnet-5-5 --case ts-sql-injection,py-ssrf
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `--model` | the default review model | `provider/model`, as in `.sentryward.yaml` |
+| `--case` | every case | comma-separated case ids (directory names) |
+| `--concurrency` | `2` | cases reviewed at once |
+| `--tolerance` | `2` | lines a finding may sit outside an expected range and still match |
+| `--strict-category` | off | also require the finding's category to be one the case accepts |
+| `--price` | built-in table | `<input>,<output>` USD per million tokens, for models the table does not list |
+| `--base-url` | none | send the model's calls to this endpoint (a proxy or Ollama) |
+| `--out` | `server/evals/reports/<time>-<model>.json` | where to write the report |
+
+Each case runs through `runReview` with the default configuration, so it
+measures what production would report. A finding matches an expected finding
+when it is in the same file and its lines overlap the expected range (within
+the tolerance); each expectation is credited once. The script prints a table and
+writes a JSON report with per-case findings, misses, false positives (and which
+of them hit a known trap), token use and cost, plus precision, recall and F1
+over the whole corpus. A review that fails outright is reported as errored and
+left out of the rates. Set `EVAL_GIT_SHA` to record the commit, since the
+container has no git.
+
+**Adding a case.** Create `server/evals/cases/<id>/` with:
+
+- `before/` and `after/`: the files the change touches, before and after. `after/`
+  also serves as the head revision for review context, so include files the
+  reviewer would need to read.
+- `diff.patch`: generate it on the host with `sh server/evals/make-patch.sh server/evals/cases/<id>`.
+- `case.yaml`:
+
+```yaml
+title: Add product search          # the PR/MR title
+description: Adds GET /products/search.
+language: typescript
+expected:                          # leave out for a change with nothing to report
+  - file: src/products/repository.ts
+    lines: [17, 18]                # new-file line range
+    category: security             # or a list of acceptable categories
+    description: search term interpolated into SQL
+traps:                             # code that looks wrong but is not
+  - file: src/products/routes.ts
+    lines: [6, 6]
+    note: /search is registered before /:id
+config: {}                         # optional camelCase config override, e.g. { review: { categories: [style] } }
+```
+
+`npm test` checks that every case loads and that each expected and trap range
+starts on an added line (a finding on an unchanged line is moved to the
+nearest added one), without calling a model. CodeQL scans the fixtures too,
+so a deliberately vulnerable case can raise an alert on its PR; dismiss it as
+"used in tests".
+
 ### Database changes
 
 ```sh

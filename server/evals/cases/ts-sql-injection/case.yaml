@@ -1,0 +1,12 @@
+title: Add product search
+description: Adds GET /products/search so the storefront can search products by name.
+language: typescript
+expected:
+  - file: src/products/repository.ts
+    lines: [17, 18]
+    category: security
+    description: the search term from the query string is interpolated into the SQL text (SQL injection)
+traps:
+  - file: src/products/routes.ts
+    lines: [6, 6]
+    note: /search is registered before /:id, so it is not captured as an id

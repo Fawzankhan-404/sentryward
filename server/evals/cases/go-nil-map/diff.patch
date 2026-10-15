@@ -1,0 +1,20 @@
+diff --git a/stats/stats.go b/stats/stats.go
+index 6f13720..8274085 100644
+--- a/stats/stats.go
++++ b/stats/stats.go
+@@ -16,6 +16,15 @@ func CountUsers(events []Event) int {
+ 	return len(seen)
+ }
+ 
++// CountByName tallies events by their normalized name.
++func CountByName(events []Event) map[string]int {
++	var counts map[string]int
++	for _, e := range events {
++		counts[normalize(e.Name)]++
++	}
++	return counts
++}
++
+ func normalize(name string) string {
+ 	return strings.ToLower(strings.TrimSpace(name))
+ }

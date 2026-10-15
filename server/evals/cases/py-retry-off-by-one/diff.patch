@@ -1,0 +1,27 @@
+diff --git a/app/webhooks.py b/app/webhooks.py
+index 9d769ae..20f3e0c 100644
+--- a/app/webhooks.py
++++ b/app/webhooks.py
+@@ -1,7 +1,19 @@
++import time
++
+ import requests
+ 
++MAX_ATTEMPTS = 3
++
+ 
+ def deliver(url, payload):
+-    response = requests.post(url, json=payload, timeout=10)
+-    response.raise_for_status()
+-    return response.status_code
++    """POST the payload, trying up to MAX_ATTEMPTS times before giving up."""
++    last_error = None
++    for attempt in range(1, MAX_ATTEMPTS):
++        try:
++            response = requests.post(url, json=payload, timeout=10)
++            response.raise_for_status()
++            return response.status_code
++        except requests.RequestException as error:
++            last_error = error
++            time.sleep(2**attempt)
++    raise last_error

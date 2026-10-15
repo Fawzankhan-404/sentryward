@@ -1,0 +1,8 @@
+title: Make the session lifetime configurable
+description: Reads the session lifetime from SESSION_TTL_SECONDS instead of hard-coding a day.
+language: typescript
+expected:
+  - file: src/sessions/store.ts
+    lines: [12, 12]
+    category: [bug, logic]
+    description: a TTL in seconds is added to Date.now() milliseconds, so sessions expire after about 86 seconds instead of a day

@@ -35,3 +35,7 @@ coverage/
 Thumbs.db
 *.suo
 *.sw?
+
+# Eval reports (server/evals/run.ts)
+server/evals/reports/*
+!server/evals/reports/.gitkeep

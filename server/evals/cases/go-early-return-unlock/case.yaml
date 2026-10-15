@@ -1,0 +1,8 @@
+title: Add Cache.Get
+description: Adds Get, which drops expired entries as it finds them.
+language: go
+expected:
+  - file: cache/cache.go
+    lines: [32, 34]
+    category: [bug, reliability]
+    description: the missing-key path returns while still holding the mutex, so the next call on the cache deadlocks

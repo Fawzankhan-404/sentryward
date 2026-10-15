@@ -1,0 +1,7 @@
+title: Sort reports
+description: Lets the reports list be sorted by newest, oldest or title.
+language: python
+traps:
+  - file: app/reports.py
+    lines: [13, 16]
+    note: the f-string only ever inserts one of the fixed SORT_COLUMNS fragments; the owner id is still bound

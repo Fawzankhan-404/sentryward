@@ -28,6 +28,11 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
   the walkthrough's one-line summary, so problems spanning files in different
   passes are visible. In that case the walkthrough runs before the passes
   instead of alongside them; if it fails, the passes still get the file list.
+- An evaluation harness for review quality (`npm run eval` in `server/`): a
+  corpus of 21 small changes in TypeScript, Python and Go with expected
+  findings and known traps, reviewed with a real model and scored by file and
+  line overlap. Reports precision, recall, false positives per case, tokens and
+  cost to a JSON file so runs can be compared. Not part of `npm test` or CI.
   Single-pass reviews are unchanged.
 
 ### Fixed

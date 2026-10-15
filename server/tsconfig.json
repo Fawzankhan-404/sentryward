@@ -10,5 +10,7 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "prisma.config.ts", "vitest.config.ts"]
+  "include": ["src", "tests", "evals", "prisma.config.ts", "vitest.config.ts"],
+  // Corpus fixtures are sample code from imaginary projects, not ours.
+  "exclude": ["evals/cases"]
 }

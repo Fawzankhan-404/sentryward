@@ -1,0 +1,8 @@
+title: Retry webhook deliveries
+description: Retries a failed webhook delivery up to three times with exponential backoff.
+language: python
+expected:
+  - file: app/webhooks.py
+    lines: [11, 11]
+    category: [bug, logic]
+    description: range(1, MAX_ATTEMPTS) runs only two attempts, not the three the docstring promises

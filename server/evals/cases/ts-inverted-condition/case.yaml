@@ -1,0 +1,8 @@
+title: Let owners use admin pages
+description: Workspace owners should have admin access too.
+language: typescript
+expected:
+  - file: src/middleware/admin.ts
+    lines: [9, 9]
+    category: [security, logic, bug]
+    description: the check is inverted; admins and owners are now rejected and everyone else is let through

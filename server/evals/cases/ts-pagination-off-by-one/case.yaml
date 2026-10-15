@@ -1,0 +1,8 @@
+title: Paginate the order list
+description: The order list grew too long for one response; it now returns 25 orders per page.
+language: typescript
+expected:
+  - file: src/orders/list.ts
+    lines: [11, 11]
+    category: [bug, logic]
+    description: page is 1-based, so skip should be (page - 1) * PAGE_SIZE; page 1 skips the newest 25 orders

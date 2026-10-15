@@ -1,0 +1,3 @@
+title: Rename fmtName to displayName
+description: Renames the helper and updates every caller.
+language: typescript

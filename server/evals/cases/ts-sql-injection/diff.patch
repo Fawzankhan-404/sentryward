@@ -1,0 +1,33 @@
+diff --git a/src/products/repository.ts b/src/products/repository.ts
+index 1d8f394..cf3e3f8 100644
+--- a/src/products/repository.ts
++++ b/src/products/repository.ts
+@@ -12,3 +12,9 @@ export async function findById(id: number): Promise<Product | null> {
+   const { rows } = await pool.query(`SELECT id, name, price_cents FROM ${TABLE} WHERE id = $1`, [id]);
+   return rows[0] ?? null;
+ }
++
++export async function search(term: string, limit = 20): Promise<Product[]> {
++  const sql = `SELECT id, name, price_cents FROM ${TABLE} WHERE name ILIKE '%${term}%' ORDER BY name LIMIT ${limit}`;
++  const { rows } = await pool.query(sql);
++  return rows;
++}
+diff --git a/src/products/routes.ts b/src/products/routes.ts
+index 29a62af..755e517 100644
+--- a/src/products/routes.ts
++++ b/src/products/routes.ts
+@@ -1,8 +1,13 @@
+ import { Router } from "express";
+-import { findById } from "./repository.ts";
++import { findById, search } from "./repository.ts";
+ 
+ export const products = Router();
+ 
++products.get("/search", async (req, res) => {
++  const term = String(req.query.q ?? "");
++  res.json(await search(term));
++});
++
+ products.get("/:id", async (req, res) => {
+   const product = await findById(Number(req.params.id));
+   if (!product) return res.status(404).json({ message: "Not found" });

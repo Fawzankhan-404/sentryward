@@ -1,0 +1,31 @@
+diff --git a/app/cart.py b/app/cart.py
+index b1c2e23..53ee225 100644
+--- a/app/cart.py
++++ b/app/cart.py
+@@ -1,4 +1,5 @@
+-import json
++import base64
++import pickle
+ 
+ from flask import Blueprint, jsonify, make_response, request
+ 
+@@ -7,7 +8,11 @@ cart = Blueprint("cart", __name__)
+ 
+ def load_cart():
+     raw = request.cookies.get("cart")
+-    return json.loads(raw) if raw else []
++    return pickle.loads(base64.b64decode(raw)) if raw else []
++
++
++def dump_cart(items):
++    return base64.b64encode(pickle.dumps(items)).decode()
+ 
+ 
+ @cart.get("/cart")
+@@ -20,5 +25,5 @@ def add_to_cart():
+     items = load_cart()
+     items.append({"sku": request.json["sku"], "qty": int(request.json.get("qty", 1))})
+     response = make_response(jsonify(items))
+-    response.set_cookie("cart", json.dumps(items), httponly=True)
++    response.set_cookie("cart", dump_cart(items), httponly=True)
+     return response
