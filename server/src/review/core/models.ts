@@ -136,7 +136,7 @@ export const omissionSchema = z.object({
 export type Omission = z.infer<typeof omissionSchema>;
 
 export const llmUsageSchema = z.object({
-  purpose: z.enum(["review", "walkthrough"]),
+  purpose: z.enum(["review", "walkthrough", "verify"]),
   model: z.string(),
   inputTokens: z.number().int().min(0),
   outputTokens: z.number().int().min(0),

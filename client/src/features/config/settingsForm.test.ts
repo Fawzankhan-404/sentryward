@@ -27,6 +27,7 @@ const schema: ConfigSchema = {
       committableSuggestions: true,
       disableCache: false,
       fileContext: true,
+      verify: "blocking",
     },
     output: {
       walkthrough: true,
@@ -97,7 +98,7 @@ describe("toSettings", () => {
     const saved = {
       profile: "strict",
       llm: { model: "openai/gpt-5" },
-      review: { blockOn: "major", fullFile: true },
+      review: { blockOn: "major", fullFile: true, verify: "all" as const },
       output: { walkthrough: false, postCheck: true },
       triggers: { review: "all" as const, reviewOnPush: false, command: false, skipLabels: ["no-review"] },
       instructions: "Keep it lean",
@@ -107,10 +108,10 @@ describe("toSettings", () => {
 
   it("saves the trigger choices and skip lists", () => {
     const form = toForm({})
-    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT, highLevelSummaryPlacement: INHERIT })
+    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT, highLevelSummaryPlacement: INHERIT, verify: INHERIT })
     const next = {
       ...form,
-      choices: { review: "manual", summary: "manual", highLevelSummaryPlacement: INHERIT },
+      choices: { review: "manual", summary: "manual", highLevelSummaryPlacement: INHERIT, verify: INHERIT },
       lists: { ...form.lists, ignoreTitles: [" WIP", "Do not review ", " "], skipAuthors: ["dependabot[bot]"] },
     }
     expect(toSettings({}, next)).toEqual({

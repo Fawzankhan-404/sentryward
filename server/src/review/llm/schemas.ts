@@ -44,6 +44,14 @@ export const reviewOutputSchema = z.object({
 });
 export type ReviewOutput = z.infer<typeof reviewOutputSchema>;
 
+export const VERIFICATION_VERDICTS = ["confirmed", "refuted", "uncertain"] as const;
+
+export const verificationOutputSchema = z.object({
+  verdict: z.enum(VERIFICATION_VERDICTS),
+  reason: z.string().describe("One or two sentences: why the finding holds, cannot happen, or cannot be decided"),
+});
+export type VerificationOutput = z.infer<typeof verificationOutputSchema>;
+
 export const walkthroughOutputSchema = z.object({
   overview: z.string().describe("Two to five sentences on what the change does and why"),
   fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
@@ -205,5 +213,15 @@ export function repairWalkthroughOutput(raw: unknown): unknown {
             .map((entry) => ({ ref: entry.ref, reason: String(entry.reason ?? "") })),
         }
       : {}),
+  };
+}
+
+// An unreadable verdict is left for the schema to reject: the call then
+// counts as failed and the finding is kept unverified, never guessed at.
+export function repairVerificationOutput(raw: unknown): unknown {
+  const output = camelKeys(record(raw));
+  return {
+    verdict: enumValue(output.verdict ?? output.status, VERIFICATION_VERDICTS),
+    reason: String(output.reason ?? ""),
   };
 }

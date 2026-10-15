@@ -20,7 +20,8 @@ import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
 import { generateWalkthrough, type WalkthroughIssues } from "./llm/walkthrough.ts";
-import { validateFindings } from "./validate/validator.ts";
+import { validateFindings, type DropReason } from "./validate/validator.ts";
+import { verifyFindings } from "./validate/verify.ts";
 
 export interface ReviewDeps {
   generate: Generate;
@@ -161,6 +162,23 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     reviewable.filter((file) => succeeded.some((part) => part.file === file)),
     config,
   );
+  // After validation, so only findings that would be published are checked,
+  // and before the verdict, so a refuted blocker cannot fail the status.
+  const verified = await verifyFindings({
+    findings: validation.findings,
+    changeSet,
+    chunks: outcomes.filter((outcome) => outcome.review).map((outcome) => outcome.chunk),
+    config,
+    generate: deps.generate,
+    concurrency: deps.concurrency ?? 3,
+  });
+  usage.push(...verified.usage);
+  warnings.push(...verified.warnings);
+  const findings = verified.findings;
+  const dropped: Partial<Record<DropReason, number>> = { ...validation.dropped };
+  for (const [reason, count] of Object.entries(verified.dropped) as [DropReason, number][]) {
+    dropped[reason] = (dropped[reason] ?? 0) + count;
+  }
 
   let status: ReviewStatus = "completed";
   if (plan.chunks.length > 0 && failedPasses === plan.chunks.length) status = "failed";
@@ -180,15 +198,15 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
       isDraft: changeSet.isDraft,
     },
     files: lineCounts(changeSet),
-    findings: validation.findings,
+    findings,
     ...(walkthrough ? { walkthrough } : {}),
     coverage: { reviewedFiles, omissions, passes: plan.chunks.length },
-    validation: { dropped: validation.dropped, demoted: validation.demoted },
+    validation: { dropped, demoted: validation.demoted + verified.demoted },
     usage,
     verdict: {
-      verdict: verdictFor(status, validation.findings, blockOn),
+      verdict: verdictFor(status, findings, blockOn),
       blockOn,
-      blocking: blockingFindings(validation.findings, blockOn).map((finding) => finding.fingerprint),
+      blocking: blockingFindings(findings, blockOn).map((finding) => finding.fingerprint),
     },
     startedAt,
     finishedAt: now().toISOString(),

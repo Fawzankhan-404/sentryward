@@ -74,6 +74,12 @@ describe("verdict", () => {
     expect(verdictFor("completed", findings, "critical")).toBe("blocked");
   });
 
+  it("never counts a verification_needed finding as blocking", () => {
+    const findings = [finding({ severity: "minor", kind: "verification_needed", fingerprint: "v" }), finding({ severity: "minor", fingerprint: "m" })];
+    expect(blockingFindings(findings, "minor").map((f) => f.fingerprint)).toEqual(["m"]);
+    expect(verdictFor("completed", [findings[0]!], "info")).toBe("pass");
+  });
+
   it("passes only a completed review with nothing blocking", () => {
     expect(verdictFor("completed", [finding({ severity: "minor" })], "critical")).toBe("pass");
     expect(verdictFor("partial", [], "critical")).toBe("error");
@@ -278,6 +284,7 @@ describe("runReview", () => {
     const { generate, requests } = fakeModel({
       code_review: { findings: [modelFinding({ severity: "critical" })] },
       walkthrough: WALKTHROUGH,
+      verification: { verdict: "confirmed", reason: "b is read from the CLI unchecked." },
     });
 
     const result = await runReview({ changeSet: makeChangeSet(), config: config(), warnings: ["w"] }, { generate, now });
@@ -295,7 +302,7 @@ describe("runReview", () => {
     expect(result.change).toMatchObject({ number: 42, headSha: "head", title: "Add b and c" });
     expect(result.files).toEqual([{ path: "src/app.ts", changeType: "modified", additions: 2, deletions: 0 }]);
     expect(result.verdict.blocking).toEqual([result.findings[0]!.fingerprint]);
-    expect(result.usage.map((u) => u.purpose).sort()).toEqual(["review", "walkthrough"]);
+    expect(result.usage.map((u) => u.purpose).sort()).toEqual(["review", "verify", "walkthrough"]);
     expect(requests.find((r) => r.schemaName === "code_review")!.model).toBe("anthropic/claude-sonnet-5-5");
   });
 

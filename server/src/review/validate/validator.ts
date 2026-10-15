@@ -19,7 +19,9 @@ export type DropReason =
   | "below_floor"
   | "empty"
   | "duplicate"
-  | "over_limit";
+  | "over_limit"
+  // A second model call showed the finding wrong (verify.ts).
+  | "refuted";
 
 export interface ValidationResult {
   findings: Finding[];
@@ -55,8 +57,39 @@ function isUnprovenBlocker(finding: ModelFinding): boolean {
   );
 }
 
+// What a finding the review cannot stand behind becomes: still shown, never
+// blocking (see isBlocking), and never more severe than it was. Kind is part
+// of the fingerprint, so it and the bucket follow.
+export function demoteFinding(finding: Finding, changeSet: ChangeSet): Finding {
+  const kind = "verification_needed";
+  return {
+    ...finding,
+    severity: severityRank(finding.severity) < severityRank("minor") ? finding.severity : "minor",
+    kind,
+    fingerprint: fingerprint({ file: finding.file, category: finding.category, kind, title: finding.title }),
+    bucket: bucketFor({ file: finding.file, startLine: finding.startLine, kind }, changeSet),
+  };
+}
+
 function rank(finding: Finding): [number, number] {
   return [severityRank(finding.severity), finding.confidence];
+}
+
+// Worst first, then most confident, then by place.
+export function compareFindings(a: Finding, b: Finding): number {
+  return (
+    severityRank(b.severity) - severityRank(a.severity) ||
+    b.confidence - a.confidence ||
+    a.file.localeCompare(b.file) ||
+    a.startLine - b.startLine
+  );
+}
+
+// Of two findings with one fingerprint, the one to keep.
+export function stronger(existing: Finding, candidate: Finding): Finding {
+  const [es, ec] = rank(existing);
+  const [ns, nc] = rank(candidate);
+  return ns < es || (ns === es && nc <= ec) ? existing : candidate;
 }
 
 export function validateFindings(
@@ -153,22 +186,11 @@ export function validateFindings(
     };
 
     const existing = kept.get(finding.fingerprint);
-    if (existing) {
-      drop("duplicate");
-      const [es, ec] = rank(existing);
-      const [ns, nc] = rank(finding);
-      if (ns < es || (ns === es && nc <= ec)) continue;
-    }
-    kept.set(finding.fingerprint, finding);
+    if (existing) drop("duplicate");
+    kept.set(finding.fingerprint, existing ? stronger(existing, finding) : finding);
   }
 
-  const sorted = [...kept.values()].sort(
-    (a, b) =>
-      severityRank(b.severity) - severityRank(a.severity) ||
-      b.confidence - a.confidence ||
-      a.file.localeCompare(b.file) ||
-      a.startLine - b.startLine,
-  );
+  const sorted = [...kept.values()].sort(compareFindings);
   const overLimit = sorted.length - config.review.maxFindings;
   if (overLimit > 0) dropped.over_limit = overLimit;
 

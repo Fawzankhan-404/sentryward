@@ -36,6 +36,7 @@ export const CHOICES = [
   { name: "review", section: "triggers" },
   { name: "summary", section: "triggers" },
   { name: "highLevelSummaryPlacement", section: "output" },
+  { name: "verify", section: "review" },
 ] as const
 
 export type ChoiceName = (typeof CHOICES)[number]["name"]

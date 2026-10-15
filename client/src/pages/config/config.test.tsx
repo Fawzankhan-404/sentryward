@@ -29,6 +29,7 @@ const effective = {
     committableSuggestions: true,
     disableCache: false,
     fileContext: true,
+    verify: "blocking",
   },
   output: {
     walkthrough: true,

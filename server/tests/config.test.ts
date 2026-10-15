@@ -66,6 +66,11 @@ describe("resolveConfig", () => {
     expect(sources.profile).toBe("repoSettings");
   });
 
+  it("verifies blocking findings by default, and not in the fast profile", () => {
+    expect(resolveConfig({}).config.review.verify).toBe("blocking");
+    expect(resolveConfig({ repoSettings: { profile: "fast" } }).config.review.verify).toBe("off");
+  });
+
   it("lets an explicit field beat the profile, wherever it is set", () => {
     const { config } = resolveConfig({
       repoSettings: { review: { blockOn: "critical" } },
@@ -263,6 +268,14 @@ describe("parseRepoFile", () => {
 
     it("treats an empty file as no overrides", () => {
     expect(parseRepoFile(".sentryward.yaml", "# nothing yet\n")).toEqual({ override: {}, warnings: [] });
+  });
+
+  it("reads review.verify and rejects an unknown mode", () => {
+    expect(parseRepoFile(".sentryward.yaml", "review:\n  verify: all\n")).toEqual({
+      override: { review: { verify: "all" } },
+      warnings: [],
+    });
+    expect(parseRepoFile(".sentryward.yaml", "review:\n  verify: sometimes\n").override).toBeUndefined();
   });
 
   it("ignores the whole file and names an unknown setting in snake_case", () => {

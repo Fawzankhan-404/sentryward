@@ -178,6 +178,16 @@ const CHOICE_INFO: Record<ChoiceName, { label: string; description: string; opti
       { value: "walkthrough", label: "Walkthrough" },
     ],
   },
+  verify: {
+    label: "Verify findings",
+    description:
+      "Check findings with a second model call before they count. Refuted findings are dropped, uncertain ones demoted instead of blocking.",
+    options: [
+      { value: "off", label: "Off" },
+      { value: "blocking", label: "Blocking findings" },
+      { value: "all", label: "All findings" },
+    ],
+  },
 }
 
 const SUMMARY_INSTRUCTIONS_EXAMPLE =
@@ -973,6 +983,7 @@ export function ConfigFields(props: {
         <FieldSeparator />
         <Section title="Review rules" description="How findings are checked and how fixes are offered.">
           <ToggleList>{toggles(["requireEvidence", "fullFile", "fileContext", "committableSuggestions"])}</ToggleList>
+          {choiceField("verify")}
         </Section>
       </>
     ),

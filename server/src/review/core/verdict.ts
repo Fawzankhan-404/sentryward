@@ -1,11 +1,18 @@
 import type { Finding, ReviewStatus, Verdict } from "./models.ts";
 import { atLeast, severityRank, type Severity } from "./severity.ts";
 
+// A finding the review could not stand behind (unproven, or left uncertain by
+// verification) never blocks, whatever blockOn is: at "minor" or "info" its
+// demoted severity alone would still reach the floor.
+export function isBlocking(finding: Finding, blockOn: Severity): boolean {
+  return finding.kind !== "verification_needed" && atLeast(finding.severity, blockOn);
+}
+
 // The findings that reach the blocking floor, worst first. The one predicate
 // behind the verdict, the summary's blocking section and the commit status.
 export function blockingFindings(findings: Finding[], blockOn: Severity): Finding[] {
   return findings
-    .filter((finding) => atLeast(finding.severity, blockOn))
+    .filter((finding) => isBlocking(finding, blockOn))
     .sort(
       (a, b) =>
         severityRank(b.severity) - severityRank(a.severity) ||

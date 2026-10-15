@@ -265,7 +265,9 @@ function coverageSection(result: ReviewResult): string[] {
 function footer(result: ReviewResult): string {
   const models = [...new Set(result.usage.map((u) => u.model))].join(", ") || "no model call";
   const passes = plural(result.coverage.passes, "review pass");
-  return `<sub>Reviewed \`${result.change.headSha.slice(0, 7)}\` with ${models} · ${passes} · ${plural(result.coverage.reviewedFiles.length, "file")} reviewed</sub>`;
+  const refuted = result.validation.dropped.refuted ?? 0;
+  const verification = refuted ? ` · ${plural(refuted, "finding")} refuted on verification` : "";
+  return `<sub>Reviewed \`${result.change.headSha.slice(0, 7)}\` with ${models} · ${passes} · ${plural(result.coverage.reviewedFiles.length, "file")} reviewed${verification}</sub>`;
 }
 
 // The one markdown document for a review. The forge summary comment and the
