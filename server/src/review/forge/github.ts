@@ -472,20 +472,38 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     const [owner, name] = ref.project.split("/");
     const self = this.options.selfLogin ? botless(this.options.selfLogin) : undefined;
     const wanted = new Set(fingerprints);
+    // Own threads found for a wanted fingerprint, whatever their state, and
+    // the ones among them still to move.
+    const seen = new Set<string>();
     const threads = new Map<string, string>();
+    let complete = false;
     let after: string | null = null;
     for (let page = 0; page < MAX_THREAD_PAGES; page++) {
       const data: GhThreadPage = await this.graphql<GhThreadPage>(REVIEW_THREADS, { owner, name, number: ref.number, after });
       const connection = data.repository?.pullRequest?.reviewThreads;
-      if (!connection) break;
-      for (const thread of connection.nodes) {
+      for (const thread of connection?.nodes ?? []) {
         const first = thread.comments.nodes[0];
         if (!first || !self || !first.author || botless(first.author.login) !== self) continue;
-        if (thread.isResolved === resolved) continue;
-        for (const print of markersIn(first.body)) if (wanted.has(print)) threads.set(print, thread.id);
+        for (const print of markersIn(first.body)) {
+          if (!wanted.has(print)) continue;
+          seen.add(print);
+          if (thread.isResolved !== resolved) threads.set(print, thread.id);
+        }
       }
-      if (!connection.pageInfo.hasNextPage) break;
+      if (!connection?.pageInfo.hasNextPage || seen.size === wanted.size) {
+        complete = true;
+        break;
+      }
       after = connection.pageInfo.endCursor;
+    }
+    // Past the cap a thread may still exist; reporting it as failed keeps it
+    // pending rather than settled.
+    if (!complete) {
+      for (const print of wanted) {
+        if (!seen.has(print)) {
+          result.failed.push({ fingerprint: print, error: `Not among the first ${MAX_THREAD_PAGES * 100} review threads` });
+        }
+      }
     }
     for (const [fingerprint, id] of threads) {
       try {

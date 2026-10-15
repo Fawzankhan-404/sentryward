@@ -135,6 +135,10 @@ const GITLAB_STATE: Record<CommitState, string> = {
   error: "failed",
 };
 
+// The same cap ForgeHttp.paginate applies by default, named so a cut-off
+// listing can be reported.
+const MAX_DISCUSSION_PAGES = 30;
+
 export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   readonly provider = "gitlab" as const;
   readonly host: string;
@@ -343,17 +347,24 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return result;
   }
 
-  // Discussions Sentryward opened: the first note is its own.
-  private async ownDiscussions(ref: ForgeRef): Promise<GlDiscussion[]> {
+  // Discussions Sentryward opened: the first note is its own. `truncated` says
+  // the listing stopped at the page cap with more left.
+  private async ownDiscussions(ref: ForgeRef): Promise<{ discussions: GlDiscussion[]; truncated: boolean }> {
+    let more = false;
     const discussions = await this.http.paginate<GlDiscussion>(
       `${this.mergeRequest(ref)}/discussions?per_page=100`,
-      nextPage,
+      (res, current) => {
+        const next = nextPage(res, current);
+        more = next !== null;
+        return next;
+      },
+      MAX_DISCUSSION_PAGES,
     );
-    return discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0]));
+    return { discussions: discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0])), truncated: more };
   }
 
   async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
-    const discussions = await this.ownDiscussions(ref);
+    const { discussions } = await this.ownDiscussions(ref);
     return new Set(discussions.flatMap((d) => markersIn(d.notes[0]!.body)));
   }
 
@@ -361,12 +372,15 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     const result: ThreadResult = { updated: [], failed: [] };
     if (fingerprints.length === 0) return result;
     const wanted = new Set(fingerprints);
-    for (const discussion of await this.ownDiscussions(ref)) {
+    const seen = new Set<string>();
+    const { discussions, truncated } = await this.ownDiscussions(ref);
+    for (const discussion of discussions) {
       const first = discussion.notes[0]!;
-      // Not a diff thread, or already where it should be.
-      if (first.resolved === undefined || first.resolved === resolved) continue;
       const print = markersIn(first.body).find((p) => wanted.has(p));
       if (!print) continue;
+      seen.add(print);
+      // Not a diff thread, or already where it should be.
+      if (first.resolved === undefined || first.resolved === resolved) continue;
       try {
         await this.http.request(
           `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
@@ -375,6 +389,15 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         result.updated.push(print);
       } catch (err) {
         result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    // Past the cap a discussion may still exist; reporting it as failed keeps
+    // it pending rather than settled.
+    if (truncated) {
+      for (const print of wanted) {
+        if (!seen.has(print)) {
+          result.failed.push({ fingerprint: print, error: `Not among the first ${MAX_DISCUSSION_PAGES * 100} discussions` });
+        }
       }
     }
     return result;

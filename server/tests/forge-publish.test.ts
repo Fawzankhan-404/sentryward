@@ -185,6 +185,28 @@ describe("GitHub publishing", () => {
     expect((await ghe.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa"], true)).updated).toEqual(["aaaaaaaaaaaaaaaa"]);
   });
 
+  it("stops reading threads once every wanted one is found", async () => {
+    const endless = structuredClone(threadPage);
+    endless.data.repository.pullRequest.reviewThreads.pageInfo = { hasNextPage: true, endCursor: "next" } as never;
+    const { gh, calls } = github([{ method: "POST", url: /\/graphql$/, body: endless }]);
+
+    expect((await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"], true)).updated).toEqual(["aaaaaaaaaaaaaaaa"]);
+    // One page read, one mutation.
+    expect(calls).toHaveLength(2);
+  });
+
+  it("reports a thread it could not reach before the page cap as failed", async () => {
+    const endless = structuredClone(threadPage);
+    endless.data.repository.pullRequest.reviewThreads.pageInfo = { hasNextPage: true, endCursor: "next" } as never;
+    const { gh, calls } = github([{ method: "POST", url: /\/graphql$/, body: endless }]);
+
+    const result = await gh.setThreadsResolved(ghRef, ["aaaaaaaaaaaaaaaa", "ffffffffffffffff"], true);
+
+    expect(result.updated).toEqual(["aaaaaaaaaaaaaaaa"]);
+    expect(result.failed).toEqual([{ fingerprint: "ffffffffffffffff", error: "Not among the first 1000 review threads" }]);
+    expect(calls.filter((c) => body(c).query.includes("reviewThreads"))).toHaveLength(10);
+  });
+
   it("sets the sentryward/review status on the head commit", async () => {
     const { gh, calls } = github([{ method: "POST", url: /\/statuses\/head$/, body: {} }]);
     await gh.setCommitStatus(ghRef, { state: "failure", description: "x".repeat(200), targetUrl: "http://app/r/1" });
@@ -310,6 +332,27 @@ describe("GitLab publishing", () => {
 
     expect(await gl.setThreadsResolved(glRef, prints, false)).toEqual({ updated: ["bbbbbbbbbbbbbbbb"], failed: [] });
     expect(calls.at(-1)!.url).toMatch(/\/discussions\/d2\?resolved=false$/);
+  });
+
+  it("reports a discussion it could not reach before the page cap as failed", async () => {
+    const { gl } = gitlab([
+      {
+        url: /\/merge_requests\/42\/discussions\?per_page=100(&page=\d+)?$/,
+        headers: { "x-next-page": "2" },
+        body: [
+          {
+            id: "d1",
+            notes: [{ id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), system: false, author: { username: "sentryward-bot" }, resolvable: true, resolved: true }],
+          },
+        ],
+      },
+    ]);
+
+    // Already resolved, so settled; the unseen one stays pending.
+    expect(await gl.setThreadsResolved(glRef, ["aaaaaaaaaaaaaaaa", "ffffffffffffffff"], true)).toEqual({
+      updated: [],
+      failed: [{ fingerprint: "ffffffffffffffff", error: "Not among the first 3000 discussions" }],
+    });
   });
 
   it("maps states onto GitLab's commit status names", async () => {
