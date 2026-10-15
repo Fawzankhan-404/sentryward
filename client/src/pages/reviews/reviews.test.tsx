@@ -402,6 +402,22 @@ describe("Review detail page", () => {
     expect(writeText.mock.calls[0][0]).toContain("Suggested replacement for those lines:\n\ndb.query(sql, [q])")
   })
 
+  it.each([
+    ["completed", "No findings. Nothing in this change needs attention."],
+    ["partial", "No findings were reported; review coverage was incomplete."],
+    ["failed", "No findings were reported; review coverage was incomplete."],
+  ] as const)("words the empty findings state for a %s result", async (status, message) => {
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, status, findings: [] } } },
+    })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    expect(await screen.findByRole("region", { name: "Findings" })).toHaveTextContent(message)
+    if (status !== "completed") {
+      expect(screen.queryByText(/Nothing in this change needs attention/)).not.toBeInTheDocument()
+    }
+  })
+
   it("explains a review that failed before producing a result", async () => {
     mockApi({
       [`GET /api/reviews/${detail.id}`]: {

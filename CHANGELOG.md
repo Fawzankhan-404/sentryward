@@ -8,6 +8,12 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- A partial or failed review with no findings no longer shows the reassuring
+  "Nothing in this change needs attention." empty state. It now says review
+  coverage was incomplete, so incomplete runs are not mistaken for all-clears.
+
 ## [0.1.0] - 2026-10-13
 
 First stable release. Sentryward remains pre-1.0; minor releases may include
