@@ -1,0 +1,42 @@
+diff --git a/src/mail/welcome.ts b/src/mail/welcome.ts
+index 151f6b2..d7b5b9b 100644
+--- a/src/mail/welcome.ts
++++ b/src/mail/welcome.ts
+@@ -1,5 +1,5 @@
+-import { fmtName, type UserName } from "../users/format.ts";
++import { displayName, type UserName } from "../users/format.ts";
+ 
+ export function welcomeSubject(user: UserName): string {
+-  return `Welcome, ${fmtName(user)}!`;
++  return `Welcome, ${displayName(user)}!`;
+ }
+diff --git a/src/users/format.ts b/src/users/format.ts
+index e13928a..11acf6c 100644
+--- a/src/users/format.ts
++++ b/src/users/format.ts
+@@ -3,6 +3,6 @@ export interface UserName {
+   last: string | null;
+ }
+ 
+-export function fmtName(user: UserName): string {
++export function displayName(user: UserName): string {
+   return user.last ? `${user.first} ${user.last}` : user.first;
+ }
+diff --git a/src/users/routes.ts b/src/users/routes.ts
+index c1984cf..cef63fd 100644
+--- a/src/users/routes.ts
++++ b/src/users/routes.ts
+@@ -1,11 +1,11 @@
+ import { Router } from "express";
+ import { prisma } from "../prisma.ts";
+-import { fmtName } from "./format.ts";
++import { displayName } from "./format.ts";
+ 
+ export const users = Router();
+ 
+ users.get("/:id", async (req, res) => {
+   const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+   if (!user) return res.status(404).json({ message: "Not found" });
+-  res.json({ id: user.id, name: fmtName(user) });
++  res.json({ id: user.id, name: displayName(user) });
+ });

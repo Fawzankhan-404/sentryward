@@ -1,0 +1,39 @@
+diff --git a/fetch/fetch.go b/fetch/fetch.go
+index 1e2274f..6c1c6d0 100644
+--- a/fetch/fetch.go
++++ b/fetch/fetch.go
+@@ -3,17 +3,28 @@ package fetch
+ import (
+ 	"context"
+ 	"net/http"
++
++	"golang.org/x/sync/errgroup"
+ )
+ 
+-// Status returns the HTTP status of each URL, in order.
++// Status returns the HTTP status of each URL, in order, checking them
++// concurrently.
+ func Status(ctx context.Context, client *http.Client, urls []string) ([]int, error) {
+ 	statuses := make([]int, len(urls))
++	g, ctx := errgroup.WithContext(ctx)
++	g.SetLimit(8)
+ 	for i, url := range urls {
+-		code, err := head(ctx, client, url)
+-		if err != nil {
+-			return nil, err
+-		}
+-		statuses[i] = code
++		g.Go(func() error {
++			code, err := head(ctx, client, url)
++			if err != nil {
++				return err
++			}
++			statuses[i] = code
++			return nil
++		})
++	}
++	if err := g.Wait(); err != nil {
++		return nil, err
+ 	}
+ 	return statuses, nil
+ }

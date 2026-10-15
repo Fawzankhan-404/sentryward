@@ -1,0 +1,8 @@
+title: Record notification channels
+description: Notifications now carry the channels they go out on; in-app is always one of them.
+language: python
+expected:
+  - file: app/notifications.py
+    lines: [11, 12]
+    category: [bug, logic]
+    description: the mutable default list is shared between calls, so "in_app" accumulates and notifications share one channels list

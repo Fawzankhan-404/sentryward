@@ -1,0 +1,8 @@
+title: Store the cart more compactly
+description: Switches the cart cookie from JSON to pickle.
+language: python
+expected:
+  - file: app/cart.py
+    lines: [11, 11]
+    category: security
+    description: unpickling a client-controlled cookie lets anyone run arbitrary code on the server

@@ -1,0 +1,7 @@
+title: Search audit events
+description: Adds searchEvents for the audit log filter.
+language: typescript
+traps:
+  - file: src/audit/repository.ts
+    lines: [23, 24]
+    note: ${COLUMNS} is a constant, and the search text and limit are bound as $2 and $3 (the % wrapping happens in the bound value)

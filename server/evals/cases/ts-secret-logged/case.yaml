@@ -1,0 +1,8 @@
+title: Log failed charges
+description: Logs the failed request when the billing provider rejects a charge, to help support debug declines.
+language: typescript
+expected:
+  - file: src/billing/client.ts
+    lines: [22, 22]
+    category: security
+    description: the logged request includes the authorization header, so the billing API key ends up in the logs

@@ -1,0 +1,7 @@
+title: Check URLs concurrently
+description: Status checks the URLs in parallel (at most 8 at a time) instead of one by one.
+language: go
+traps:
+  - file: fetch/fetch.go
+    lines: [17, 22]
+    note: the module targets Go 1.23, where i and url are per-iteration variables, and each goroutine writes its own slice index

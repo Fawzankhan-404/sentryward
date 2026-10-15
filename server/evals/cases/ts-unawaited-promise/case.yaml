@@ -1,0 +1,8 @@
+title: Simplify inviting members
+description: Replaces the for loop with forEach.
+language: typescript
+expected:
+  - file: src/invites/service.ts
+    lines: [6, 11]
+    category: [bug, reliability]
+    description: forEach does not await the async callback, so the function returns an empty list before any invite is created and errors go unhandled

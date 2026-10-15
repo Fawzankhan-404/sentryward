@@ -1,0 +1,46 @@
+diff --git a/src/orders/list.ts b/src/orders/list.ts
+index 99519e3..681a006 100644
+--- a/src/orders/list.ts
++++ b/src/orders/list.ts
+@@ -1,8 +1,17 @@
+ import { prisma } from "../prisma.ts";
+ 
+-export async function listOrders(customerId: string) {
+-  return prisma.order.findMany({
+-    where: { customerId },
+-    orderBy: { createdAt: "desc" },
+-  });
++export const PAGE_SIZE = 25;
++
++// `page` is 1-based, as the API documents and the client sends it.
++export async function listOrders(customerId: string, page = 1) {
++  const [orders, total] = await Promise.all([
++    prisma.order.findMany({
++      where: { customerId },
++      orderBy: { createdAt: "desc" },
++      skip: page * PAGE_SIZE,
++      take: PAGE_SIZE,
++    }),
++    prisma.order.count({ where: { customerId } }),
++  ]);
++  return { orders, page, pages: Math.ceil(total / PAGE_SIZE) };
+ }
+diff --git a/src/orders/routes.ts b/src/orders/routes.ts
+index 3f98694..d223a57 100644
+--- a/src/orders/routes.ts
++++ b/src/orders/routes.ts
+@@ -1,9 +1,13 @@
+ import { Router } from "express";
++import { z } from "zod";
+ import { requireAuth } from "../auth.ts";
+ import { listOrders } from "./list.ts";
+ 
+ export const orders = Router();
+ 
++const query = z.object({ page: z.coerce.number().int().min(1).default(1) });
++
+ orders.get("/", requireAuth, async (req, res) => {
+-  res.json(await listOrders(req.userId!));
++  const { page } = query.parse(req.query);
++  res.json(await listOrders(req.userId!, page));
+ });

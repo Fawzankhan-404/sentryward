@@ -1,0 +1,30 @@
+diff --git a/src/config.ts b/src/config.ts
+index e66b019..162dbc3 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -1,3 +1,5 @@
+ export const config = {
+   port: Number(process.env.PORT ?? 3000),
++  // How long a sign-in lasts, in seconds.
++  sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS ?? 24 * 60 * 60),
+ };
+diff --git a/src/sessions/store.ts b/src/sessions/store.ts
+index 88380d6..c1a4f53 100644
+--- a/src/sessions/store.ts
++++ b/src/sessions/store.ts
+@@ -1,5 +1,6 @@
+ import { randomBytes } from "node:crypto";
+ import { redis } from "../redis.ts";
++import { config } from "../config.ts";
+ 
+ export interface Session {
+   userId: string;
+@@ -8,7 +9,7 @@ export interface Session {
+ 
+ export async function createSession(userId: string): Promise<string> {
+   const id = randomBytes(32).toString("hex");
+-  const session: Session = { userId, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
++  const session: Session = { userId, expiresAt: Date.now() + config.sessionTtlSeconds };
+   await redis.set(`session:${id}`, JSON.stringify(session));
+   return id;
+ }

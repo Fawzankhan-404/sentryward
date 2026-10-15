@@ -1,0 +1,25 @@
+import re
+
+import requests
+from flask import Blueprint, jsonify, request
+
+from .db import save_link
+
+links = Blueprint("links", __name__)
+
+TITLE = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+@links.post("/links")
+def create_link():
+    url = request.json["url"]
+    link = save_link(url)
+    return jsonify({"id": link.id, "url": link.url}), 201
+
+
+@links.get("/links/preview")
+def preview_link():
+    url = request.args["url"]
+    response = requests.get(url, timeout=5)
+    match = TITLE.search(response.text)
+    return jsonify({"url": url, "status": response.status_code, "title": match.group(1).strip() if match else None})

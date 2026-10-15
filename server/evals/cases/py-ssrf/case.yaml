@@ -1,0 +1,8 @@
+title: Link previews
+description: Adds GET /links/preview?url=... which fetches a page and returns its title for the link card.
+language: python
+expected:
+  - file: app/links.py
+    lines: [22, 23]
+    category: security
+    description: the server fetches any user-supplied URL, so it can be pointed at internal services or cloud metadata (SSRF)

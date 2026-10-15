@@ -1,0 +1,21 @@
+diff --git a/app/notifications.py b/app/notifications.py
+index 1297e55..d55b793 100644
+--- a/app/notifications.py
++++ b/app/notifications.py
+@@ -1,11 +1,13 @@
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ 
+ 
+ @dataclass
+ class Notification:
+     user_id: int
+     message: str
++    channels: list = field(default_factory=list)
+ 
+ 
+-def build_notification(user_id, message):
+-    return Notification(user_id=user_id, message=message)
++def build_notification(user_id, message, channels=[]):
++    channels.append("in_app")
++    return Notification(user_id=user_id, message=message, channels=channels)

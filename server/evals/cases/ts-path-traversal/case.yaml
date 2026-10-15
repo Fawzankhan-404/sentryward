@@ -1,0 +1,12 @@
+title: Let users download their uploads
+description: Adds GET /files/download?name=... to stream one of the signed-in user's uploaded files.
+language: typescript
+expected:
+  - file: src/files/routes.ts
+    lines: [16, 20]
+    category: security
+    description: the name query parameter is joined onto the upload directory unchecked, so ../ reads files outside it (path traversal)
+traps:
+  - file: src/files/routes.ts
+    lines: [19, 19]
+    note: the filename in Content-Disposition is URL-encoded, so it cannot inject headers

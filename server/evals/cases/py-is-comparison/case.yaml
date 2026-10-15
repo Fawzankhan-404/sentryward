@@ -1,0 +1,8 @@
+title: Paused subscriptions are not active
+description: Treats paused subscriptions as inactive.
+language: python
+expected:
+  - file: app/subscriptions.py
+    lines: [7, 7]
+    category: [bug, logic]
+    description: "`is` compares identity, not equality; a status read from the database is not the same object as the literal, so paused subscriptions stay active"

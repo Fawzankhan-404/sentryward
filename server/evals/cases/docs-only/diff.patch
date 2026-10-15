@@ -1,0 +1,27 @@
+diff --git a/README.md b/README.md
+index 1741c39..9803b22 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # Inventory service
+ 
+-Tracks stock levels across warehouses.
++Tracks stock levels across warehouses and raises low-stock alerts.
+ 
+ ## Running locally
+ 
+@@ -9,4 +9,13 @@ cp .env.example .env
+ docker compose up
+ ```
+ 
+-The API listens on port 3000.
++The API listens on port 3000. Set `PORT` in `.env` to change it.
++
++## Running the tests
++
++```sh
++docker compose exec api npm test
++```
++
++Tests run against a separate `inventory_test` database that the compose file
++creates on first start.

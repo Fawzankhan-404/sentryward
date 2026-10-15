@@ -1,0 +1,8 @@
+title: Allow deleting projects
+description: Adds DELETE /projects/:id.
+language: typescript
+expected:
+  - file: src/projects/routes.ts
+    lines: [28, 30]
+    category: security
+    description: the delete does not check ownership (loadOwned), so any signed-in user can delete anyone's project by id

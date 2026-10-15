@@ -1,0 +1,24 @@
+diff --git a/cache/cache.go b/cache/cache.go
+index 6f47b49..c390af6 100644
+--- a/cache/cache.go
++++ b/cache/cache.go
+@@ -24,3 +24,19 @@ func (c *Cache) Set(key string, value []byte, ttl time.Duration) {
+ 	defer c.mu.Unlock()
+ 	c.entries[key] = entry{value: value, expiresAt: time.Now().Add(ttl)}
+ }
++
++// Get returns the value for key, dropping it if it has expired.
++func (c *Cache) Get(key string) ([]byte, bool) {
++	c.mu.Lock()
++	e, ok := c.entries[key]
++	if !ok {
++		return nil, false
++	}
++	if time.Now().After(e.expiresAt) {
++		delete(c.entries, key)
++		c.mu.Unlock()
++		return nil, false
++	}
++	c.mu.Unlock()
++	return e.value, true
++}
