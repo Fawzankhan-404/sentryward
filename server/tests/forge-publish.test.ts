@@ -376,6 +376,32 @@ describe("GitLab publishing", () => {
     expect(reads).toBe(35);
   });
 
+  it("stops reading discussions once every wanted thread is found", async () => {
+    let reads = 0;
+    const fetch = async (url: string | URL | Request) => {
+      if (String(url).includes("?resolved=")) return Response.json({});
+      reads++;
+      const discussions = [{ id: "d1", notes: [{ id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), system: false, author: { username: "sentryward-bot" }, resolvable: true, resolved: false }] }];
+      return Response.json(discussions, { headers: { "x-next-page": String(reads + 1) } });
+    };
+    const gl = new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch });
+
+    expect(await gl.setThreadsResolved(glRef, ["aaaaaaaaaaaaaaaa"], true)).toEqual({ updated: ["aaaaaaaaaaaaaaaa"], failed: [] });
+    expect(reads).toBe(1);
+  });
+
+  it("keeps the page cap when only listing posted fingerprints", async () => {
+    let reads = 0;
+    const fetch = async () => {
+      reads++;
+      return Response.json([], { headers: { "x-next-page": String(reads + 1) } });
+    };
+    const gl = new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch });
+
+    expect(await gl.listPostedFingerprints(glRef)).toEqual(new Set());
+    expect(reads).toBe(30);
+  });
+
   it("keeps an unreached discussion pending when the next page stops moving", async () => {
     const { gl } = gitlab([
       {

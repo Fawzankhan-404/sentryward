@@ -344,30 +344,16 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return result;
   }
 
-  // Discussions Sentryward opened: the first note is its own. Every page is
-  // read: a later run starts from the first page again, so a fixed cap would
-  // leave a discussion past it out of reach for good. `truncated` says the
-  // listing stopped early because the forge's next page did not move.
-  private async ownDiscussions(ref: ForgeRef): Promise<{ discussions: GlDiscussion[]; truncated: boolean }> {
-    let truncated = false;
-    const discussions = await this.http.paginate<GlDiscussion>(
-      `${this.mergeRequest(ref)}/discussions?per_page=100`,
-      (res, current) => {
-        const next = nextPage(res, current);
-        if (next !== null && next === current) {
-          truncated = true;
-          return null;
-        }
-        return next;
-      },
-      Infinity,
-    );
-    return { discussions: discussions.filter((d) => d.notes[0] && this.isSelf(d.notes[0])), truncated };
+  // Sentryward opened the discussion: its first note is Sentryward's own.
+  private isOwn(discussion: GlDiscussion): boolean {
+    return Boolean(discussion.notes[0] && this.isSelf(discussion.notes[0]));
   }
 
+  // Runs on every inline publish, so it keeps the default page cap; a marker
+  // past it only risks a duplicate comment.
   async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
-    const { discussions } = await this.ownDiscussions(ref);
-    return new Set(discussions.flatMap((d) => markersIn(d.notes[0]!.body)));
+    const discussions = await this.http.paginate<GlDiscussion>(`${this.mergeRequest(ref)}/discussions?per_page=100`, nextPage);
+    return new Set(discussions.filter((d) => this.isOwn(d)).flatMap((d) => markersIn(d.notes[0]!.body)));
   }
 
   async setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult> {
@@ -375,30 +361,48 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     if (fingerprints.length === 0) return result;
     const wanted = new Set(fingerprints);
     const seen = new Set<string>();
-    const { discussions, truncated } = await this.ownDiscussions(ref);
-    for (const discussion of discussions) {
-      const first = discussion.notes[0]!;
-      const print = markersIn(first.body).find((p) => wanted.has(p));
-      if (!print) continue;
-      seen.add(print);
-      // Not a diff thread, or already where it should be.
-      if (first.resolved === undefined || first.resolved === resolved) continue;
-      // Only a discussion Sentryward resolved is reopened; one a person
-      // resolved stays resolved.
-      if (!resolved && first.resolved_by?.username !== this.selfLogin) continue;
-      try {
-        await this.http.request(
-          `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
-          { method: "PUT" },
-        );
-        result.updated.push(print);
-      } catch (err) {
-        result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
+    // Read a page at a time until every wanted discussion is found or they run
+    // out: a later run starts from the first page again, so stopping at a fixed
+    // cap would leave a discussion past it out of reach for good. Only runs
+    // with a thread to move pay for this, and pages are not kept.
+    let complete = false;
+    let url: string | null = `${this.mergeRequest(ref)}/discussions?per_page=100`;
+    while (url) {
+      const res = await this.http.request(url);
+      const page = (await res.json()) as GlDiscussion[];
+      for (const discussion of page) {
+        if (!this.isOwn(discussion)) continue;
+        const first = discussion.notes[0]!;
+        const print = markersIn(first.body).find((p) => wanted.has(p));
+        if (!print) continue;
+        seen.add(print);
+        // Not a diff thread, or already where it should be.
+        if (first.resolved === undefined || first.resolved === resolved) continue;
+        // Only a discussion Sentryward resolved is reopened; one a person
+        // resolved stays resolved.
+        if (!resolved && first.resolved_by?.username !== this.selfLogin) continue;
+        try {
+          await this.http.request(
+            `${this.mergeRequest(ref)}/discussions/${encodeURIComponent(discussion.id)}?resolved=${resolved}`,
+            { method: "PUT" },
+          );
+          result.updated.push(print);
+        } catch (err) {
+          result.failed.push({ fingerprint: print, error: err instanceof Error ? err.message : String(err) });
+        }
       }
+      const next = nextPage(res, url);
+      if (next === null || seen.size === wanted.size) {
+        complete = true;
+        break;
+      }
+      // A next page that does not move would loop forever.
+      if (next === url) break;
+      url = next;
     }
     // A discussion the listing never reached may still exist; reporting it as
     // failed keeps it pending rather than settled.
-    if (truncated) {
+    if (!complete) {
       for (const print of wanted) {
         if (!seen.has(print)) {
           result.failed.push({ fingerprint: print, error: "Discussion listing stopped early" });
