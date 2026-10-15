@@ -44,6 +44,8 @@ const dashboardLlmShape = {
   endpointKey: z.enum(["anthropic", "openai", "google", "ollama"]).nullable(),
 };
 
+export const VERIFY_MODES = ["off", "blocking", "all"] as const;
+
 const reviewShape = {
   categories: z.array(categorySchema).min(1),
   // What is reported at all.
@@ -64,6 +66,10 @@ const reviewShape = {
   // Show each pass the enclosing scope, imports, definitions and callers of
   // the changed code, read from the head revision, next to the diff.
   fileContext: z.boolean(),
+  // Re-check findings with a second model call before they count: refuted
+  // ones are dropped, uncertain ones demoted like an unproven blocker.
+  // "blocking" checks only those at or above blockOn, "all" every finding.
+  verify: z.enum(VERIFY_MODES),
 };
 
 export const SUMMARY_LOCATIONS = ["dynamic", "description", "comment"] as const;
@@ -189,6 +195,7 @@ export const DEFAULT_CONFIG: Config = {
     committableSuggestions: true,
     disableCache: false,
     fileContext: true,
+    verify: "blocking",
   },
   output: {
     walkthrough: true,

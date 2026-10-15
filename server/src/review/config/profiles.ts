@@ -5,9 +5,9 @@ import type { ConfigOverride, ProfileName } from "./schema.ts";
 export const PROFILES: Record<ProfileName, ConfigOverride> = {
   // The defaults as they are.
   balanced: {},
-  // One model call per pass and fewer passes: no walkthrough.
+  // One model call per pass and fewer passes: no walkthrough or verification.
   fast: {
-    review: { maxChunks: 4 },
+    review: { maxChunks: 4, verify: "off" },
     output: { walkthrough: false },
   },
   // Majors block, more findings are kept, low-confidence ones still dropped.

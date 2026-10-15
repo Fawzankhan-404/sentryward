@@ -22,7 +22,9 @@ export async function sampleResult(): Promise<ReviewResult> {
     },
     walkthrough: WALKTHROUGH,
   });
-  const { config } = resolveConfig({ trigger: { review: { fullFile: true } } });
+  // Verification is off so the rendered snapshot and usage totals cover the
+  // review itself; tests/verify.test.ts covers it.
+  const { config } = resolveConfig({ trigger: { review: { fullFile: true, verify: "off" } } });
   return runReview(
     { changeSet, config, warnings: [".sentryward.yaml was ignored: review: unknown setting nope"] },
     { generate, now: () => new Date("2026-10-04T12:00:00Z") },

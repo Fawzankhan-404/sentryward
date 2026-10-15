@@ -7,6 +7,7 @@ export type LlmProviderName = "anthropic" | "openai" | "google" | "ollama"
 export type ReviewTrigger = "manual" | "published" | "all"
 export type SummaryTrigger = "manual" | "published"
 export type HighLevelSummaryPlacement = "description" | "walkthrough"
+export type VerifyMode = "off" | "blocking" | "all"
 
 // A partial review config; mirrors server/src/review/config/schema.ts.
 export interface ConfigOverride {
@@ -35,6 +36,7 @@ export interface ConfigOverride {
     committableSuggestions?: boolean
     disableCache?: boolean
     fileContext?: boolean
+    verify?: VerifyMode
   }
   output?: {
     walkthrough?: boolean
@@ -103,6 +105,7 @@ export interface EffectiveConfig {
     committableSuggestions: boolean
     disableCache: boolean
     fileContext: boolean
+    verify: VerifyMode
   }
   output: {
     walkthrough: boolean

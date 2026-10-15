@@ -188,7 +188,12 @@ const SAMPLE_WALKTHROUGH: FullWalkthroughOutput = {
 
 // Answers like a model would, by schema name; never touches the network.
 export const sampleGenerate: Generate = async <T>(request: GenerateRequest<T>): Promise<GenerateResponse<T>> => {
-  const object = request.schemaName === "walkthrough" ? SAMPLE_WALKTHROUGH : { findings: SAMPLE_FINDINGS };
+  const object =
+    request.schemaName === "walkthrough"
+      ? SAMPLE_WALKTHROUGH
+      : request.schemaName === "verification"
+        ? { verdict: "confirmed", reason: "The failure path is in the diff." }
+        : { findings: SAMPLE_FINDINGS };
   return { object: object as T, model: request.model, inputTokens: 0, outputTokens: 0, latencyMs: 0 };
 };
 
