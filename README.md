@@ -173,7 +173,7 @@ used.
 
 | Role | Can |
 | ---- | --- |
-| `member` | View the team's data, request and rerun reviews, triage findings, leave the team |
+| `member` | View the team's data, request, rerun and cancel reviews, triage findings, leave the team |
 | `admin` | Everything a member can, plus manage connections, repositories, review config and LLM keys, add and remove members, and invite people |
 | `owner` | Everything an admin can, plus grant or revoke ownership, rename and delete the team |
 
@@ -471,6 +471,7 @@ so scripts written before workspaces keep working. Routes under
 | GET    | `/api/reviews/:id`   | One review with its full result |
 | GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
 | POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
+| POST   | `/api/reviews/:id/cancel` | Cancels a queued or running review; a running one stops within one check interval (about 15s) and posts nothing more. `409` once it has finished |
 | POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
 | POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Sentryward registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
