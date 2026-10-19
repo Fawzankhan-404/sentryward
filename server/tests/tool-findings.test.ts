@@ -145,13 +145,13 @@ describe("runReview with tool annotations", () => {
         // Line 40 is outside the diff, so with full_file the finding is
         // summarised in full rather than only indexed.
         config: config({ review: { fullFile: true } }),
-        toolAnnotations: [annotation({ tool: "ES*Lint" }), annotation({ tool: "ES*Lint", startLine: 40, endLine: 40, title: "Other" })],
+        toolAnnotations: [annotation({ tool: "ES*Lint\\_x" }), annotation({ tool: "ES*Lint\\_x", startLine: 40, endLine: 40, title: "Other" })],
       },
       { generate: model([]), now },
     );
     const actionable = result.findings.find((finding) => finding.bucket === "actionable")!;
-    expect(inlineBody(actionable, "github")).toContain("· via ES\\*Lint");
-    expect(toMarkdown(result)).toContain("potential issue · via ES\\*Lint*");
+    expect(inlineBody(actionable, "github")).toContain("· via ES\\*Lint\\\\\\_x");
+    expect(toMarkdown(result)).toContain("potential issue · via ES\\*Lint\\\\\\_x*");
   });
 });
 

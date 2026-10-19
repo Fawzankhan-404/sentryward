@@ -67,9 +67,11 @@ function codeCell(text: string): string {
 }
 
 // Names the analyzer behind a tool finding, after its severity and category.
-// The name comes from the forge (a check run or report), so it is escaped too.
+// The name comes from the forge (a check run or report), so it is escaped
+// too: backslashes with the emphasis characters, in one pass, so a name
+// ending in "\" cannot cancel the escape after it.
 export function toolSuffix(finding: Finding): string {
-  return finding.source === "tool" && finding.tool ? ` · via ${inline(finding.tool).replace(/[*_`]/g, "\\$&")}` : "";
+  return finding.source === "tool" && finding.tool ? ` · via ${codeCell(finding.tool.replace(/[\\*_`]/g, "\\$&"))}` : "";
 }
 
 function location(finding: Finding): string {
