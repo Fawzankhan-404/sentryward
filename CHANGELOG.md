@@ -10,6 +10,15 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- Reviews triggered by a push are incremental: only files the new commits
+  touched since the last completed review are reviewed again (each with its
+  whole PR/MR diff), and that review's findings on the other files are carried
+  over, so they stay open, still count toward the verdict and are not posted
+  again. The summary comment names the reviewed commit range. A force push or
+  rebase, a partial or failed last review, a comparison the forge cannot
+  answer, and manual or `/sentryward review` requests all get a full review.
+  `triggers.full_review_on_push` (off by default) reviews the whole change on
+  every push instead.
 - Review passes see the code around the diff, not just the hunks: the
   enclosing function or class and the imports of each changed file, the
   definitions of functions the diff calls, and call sites of the functions it

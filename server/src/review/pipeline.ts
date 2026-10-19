@@ -3,6 +3,7 @@ import { verdictFor, blockingFindings } from "./core/verdict.ts";
 import {
   RESULT_SCHEMA_VERSION,
   type ChangeSet,
+  type Finding,
   type LlmUsage,
   type Omission,
   type OmissionReason,
@@ -21,7 +22,7 @@ import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
 import { generateWalkthrough, type WalkthroughIssues } from "./llm/walkthrough.ts";
-import { validateFindings, type DropReason } from "./validate/validator.ts";
+import { compareFindings, validateFindings, type DropReason } from "./validate/validator.ts";
 import { verifyFindings } from "./validate/verify.ts";
 
 export interface ReviewDeps {
@@ -47,6 +48,19 @@ export interface RunReviewInput {
   // Recent repo-wide dismissals, listed in the prompt so the model learns what
   // this team rejects. Fetched by the caller.
   rejectedFindings?: RejectedFinding[];
+  // Review only these files of the change, and keep the earlier review's
+  // findings on the rest (worker/incremental.ts). Absent means a full review.
+  increment?: Increment;
+}
+
+export interface Increment {
+  fromSha: string;
+  toSha: string;
+  // Paths in the change touched by commits since `fromSha`.
+  paths: ReadonlySet<string>;
+  // Findings from the review of `fromSha` on files outside `paths`. Those
+  // files are the same at both heads, so their lines still hold.
+  carried: Finding[];
 }
 
 // Omissions that mean the change was not fully reviewed. Ignored, binary and
@@ -103,15 +117,20 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   const usage: LlmUsage[] = [];
 
   const { reviewable, omissions: classified } = classifyFiles(changeSet.files, config.ignorePaths);
+  // An incremental review plans passes over the files changed since the last
+  // review only. The rest were reviewed then and are not omissions; the
+  // walkthrough and manifest still describe the whole change.
+  const { increment } = input;
+  const scoped = increment ? reviewable.filter((file) => increment.paths.has(file.path)) : reviewable;
   let overhead = estimateTokens(reviewSystemPrompt(config)) + USER_PROMPT_ALLOWANCE;
-  let plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+  let plan = planChunks(scoped, diffTokenBudget(config, overhead), config.review.maxChunks);
   // Only a change that needs several passes gets the manifest, so only then is
   // it paid for, and a single-pass review is planned exactly as before. Should
   // the smaller budget ever leave one pass, the prompt simply omits the list.
   const multiPass = plan.chunks.length > 1;
   if (multiPass) {
     overhead += MANIFEST_ALLOWANCE;
-    plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+    plan = planChunks(scoped, diffTokenBudget(config, overhead), config.review.maxChunks);
   }
   const omissions: Omission[] = [...classified, ...plan.omissions];
 
@@ -197,7 +216,7 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   const validation = validateFindings(
     raw,
     changeSet,
-    reviewable.filter((file) => succeeded.some((part) => part.file === file)),
+    scoped.filter((file) => succeeded.some((part) => part.file === file)),
     config,
     input.ignoredFingerprints,
   );
@@ -214,7 +233,20 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   });
   usage.push(...verified.usage);
   warnings.push(...verified.warnings);
-  const findings = verified.findings;
+  // Carried findings join after validation and verification: they passed both
+  // when first reported, and only a dismissal since then removes them. A file
+  // ignored since then drops its findings too, as a full review would (the
+  // worker reviews in full when ignore_paths changes, this keeps it true here).
+  const fresh = new Set(verified.findings.map((finding) => finding.fingerprint));
+  const reviewablePaths = new Set(reviewable.map((file) => file.path));
+  const carried = (increment?.carried ?? []).filter(
+    (finding) =>
+      !increment?.paths.has(finding.file) &&
+      reviewablePaths.has(finding.file) &&
+      !fresh.has(finding.fingerprint) &&
+      !input.ignoredFingerprints?.has(finding.fingerprint),
+  );
+  const findings = carried.length ? [...verified.findings, ...carried].sort(compareFindings) : verified.findings;
   const dropped: Partial<Record<DropReason, number>> = { ...validation.dropped };
   for (const [reason, count] of Object.entries(verified.dropped) as [DropReason, number][]) {
     dropped[reason] = (dropped[reason] ?? 0) + count;
@@ -240,6 +272,16 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     files: lineCounts(changeSet),
     findings,
     ...(walkthrough ? { walkthrough } : {}),
+    ...(increment
+      ? {
+          incremental: {
+            fromSha: increment.fromSha,
+            toSha: increment.toSha,
+            files: scoped.map((file) => file.path),
+            carried: carried.length,
+          },
+        }
+      : {}),
     coverage: { reviewedFiles, omissions, passes: plan.chunks.length },
     validation: { dropped, demoted: validation.demoted + verified.demoted },
     usage,

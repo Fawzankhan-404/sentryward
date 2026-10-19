@@ -123,6 +123,9 @@ const triggersShape = {
   review: z.enum(REVIEW_TRIGGERS),
   // Review again when an open PR/MR receives new commits.
   reviewOnPush: z.boolean(),
+  // Review the whole change on push, instead of only the files the new commits
+  // touched since the last completed review (worker/incremental.ts).
+  fullReviewOnPush: z.boolean(),
   // Legacy, from before `review` existed: onPush turned all automatic reviews
   // on or off and drafts included drafts. Still accepted so older files and
   // saved settings keep validating; resolve.ts maps them onto `review`.
@@ -228,6 +231,7 @@ export const DEFAULT_CONFIG: Config = {
   triggers: {
     review: "published",
     reviewOnPush: true,
+    fullReviewOnPush: false,
     onPush: true,
     drafts: false,
     summary: "published",

@@ -213,6 +213,17 @@ export const reviewResultSchema = z.object({
   ),
   findings: z.array(findingSchema),
   walkthrough: walkthroughSchema.optional(),
+  // Set when only the files changed since an earlier completed review were
+  // reviewed (worker/incremental.ts). `files` are the paths reviewed again;
+  // `carried` counts the findings kept from that review for the other files.
+  incremental: z
+    .object({
+      fromSha: z.string(),
+      toSha: z.string(),
+      files: z.array(z.string()),
+      carried: z.number().int().min(0),
+    })
+    .optional(),
   coverage: z.object({
     reviewedFiles: z.array(z.string()),
     omissions: z.array(omissionSchema),

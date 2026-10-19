@@ -61,7 +61,15 @@ export interface ForgeAdapter {
   // Paths of files mentioning `term`, best match first, at most
   // MAX_CODE_SEARCH_RESULTS. `ref` is honoured where the forge can search one.
   searchCode(project: string, term: string, ref: string): Promise<string[]>;
+  // Paths (old and new) changed from `from` to `to`, or null when `from` is gone
+  // or is not an ancestor of `to` (a force push or rebase), or when the forge
+  // cut the list short. Fixed by the two shas, so read through the cache.
+  compareCommits(project: string, from: string, to: string, cache?: ForgeCache): Promise<string[] | null>;
 }
+
+// GitHub's compare endpoint lists at most this many files and says nothing
+// when it stops, so a list this long may be incomplete.
+export const MAX_COMPARE_FILES = 300;
 
 export const MAX_CODE_SEARCH_RESULTS = 20;
 

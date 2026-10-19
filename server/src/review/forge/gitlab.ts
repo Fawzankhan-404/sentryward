@@ -1,7 +1,7 @@
 import { markersIn, SUMMARY_MARKER, withoutDescriptionBlock } from "../core/markers.ts";
 import type { ChangeSet, ChangeType, ForgeRef, IssueContext } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
-import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
+import { ForgeError, ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
 import { cacheKey, cached, type ForgeCache } from "./cache.ts";
 import { MAX_CANDIDATE_ISSUES, MAX_LINKED_ISSUES } from "./issues.ts";
 import {
@@ -66,6 +66,12 @@ interface GlDiff {
   diff: string;
   too_large?: boolean;
   collapsed?: boolean;
+}
+
+interface GlComparison {
+  diffs?: Pick<GlDiff, "old_path" | "new_path">[];
+  // Set when GitLab gave up computing the diff; the list is then incomplete.
+  compare_timeout?: boolean;
 }
 
 function changeTypeOf(diff: GlDiff): ChangeType {
@@ -305,6 +311,32 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       `${this.project(project)}/search?scope=blobs&search=${encodeURIComponent(term)}&ref=${encodeURIComponent(ref)}&per_page=${MAX_CODE_SEARCH_RESULTS}`,
     );
     return [...new Set(blobs.map((blob) => blob.path))];
+  }
+
+  // The compare endpoint diffs from the merge base whatever the history, so
+  // ancestry is asked separately: `from` is an ancestor exactly when it is its
+  // own merge base with `to`.
+  async compareCommits(project: string, from: string, to: string, cache?: ForgeCache): Promise<string[] | null> {
+    return cached(cache, cacheKey("gitlab-compare", this.host, project, from, to), async () => {
+      const repository = `${this.project(project)}/repository`;
+      let base: { id: string };
+      try {
+        base = await this.http.json<{ id: string }>(
+          `${repository}/merge_base?refs[]=${encodeURIComponent(from)}&refs[]=${encodeURIComponent(to)}`,
+        );
+      } catch (err) {
+        // 400 is GitLab's "Could not find ref" (a commit gone after a force
+        // push), 404 means the two share no history.
+        if (isNotFound(err) || (err instanceof ForgeError && err.status === 400)) return null;
+        throw err;
+      }
+      if (base.id !== from) return null;
+      const comparison = await this.http.json<GlComparison>(
+        `${repository}/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      );
+      if (comparison.compare_timeout) return null;
+      return [...new Set((comparison.diffs ?? []).flatMap((diff) => [diff.new_path, diff.old_path]))];
+    });
   }
 
   private mergeRequest(ref: ForgeRef): string {
