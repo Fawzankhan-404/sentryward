@@ -1,7 +1,7 @@
 import type { Config } from "../config/schema.ts";
 import type { ChangeSet, Finding, LlmUsage } from "../core/models.ts";
 import { VERIFY_SYSTEM_PROMPT, verifyUserPrompt } from "./prompt.ts";
-import { generateWithFallback, type Generate } from "./providers.ts";
+import { generateWithFallback, modelChain, type Generate } from "./providers.ts";
 import { repairVerificationOutput, verificationOutputSchema, type VerificationOutput } from "./schemas.ts";
 
 // A verdict and a sentence need little room.
@@ -18,7 +18,7 @@ export async function verifyFinding(
   code: { diff: string; context: string },
   config: Config,
 ): Promise<FindingVerification> {
-  const response = await generateWithFallback(generate, [config.llm.model, ...config.llm.fallbackModels], {
+  const response = await generateWithFallback(generate, modelChain(config.llm, "verify"), {
     system: VERIFY_SYSTEM_PROMPT,
     prompt: verifyUserPrompt(changeSet, finding, code.diff, code.context),
     schema: verificationOutputSchema,

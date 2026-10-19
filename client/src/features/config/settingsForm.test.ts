@@ -8,6 +8,8 @@ const schema: ConfigSchema = {
     llm: {
       model: "anthropic/claude-sonnet-5-5",
       fallbackModels: [],
+      walkthroughModel: null,
+      verifyModel: null,
       temperature: 0.2,
       maxTokens: 8000,
       contextBudget: null,
@@ -102,7 +104,7 @@ describe("toSettings", () => {
   it("round-trips saved settings through the form", () => {
     const saved = {
       profile: "strict",
-      llm: { model: "openai/gpt-5" },
+      llm: { model: "openai/gpt-5", walkthroughModel: "openai/gpt-5-mini", verifyModel: "openai/gpt-5.5" },
       review: { blockOn: "major", fullFile: true, verify: "all" as const },
       output: { walkthrough: false, postCheck: true },
       triggers: { review: "all" as const, reviewOnPush: false, command: false, skipLabels: ["no-review"] },
@@ -274,6 +276,8 @@ describe("validateForm", () => {
     const errors = validateForm({
       ...form,
       model: "claude",
+      walkthroughModel: "haiku",
+      verifyModel: "anthropic/claude-opus-5-5",
       fallbackModels: ["openai/a", "openai/b", "openai/c", "openai/d"],
       categories: [],
       numbers: { ...form.numbers, temperature: "2", maxTokens: "1.5", contextBudget: "lots" },
@@ -290,6 +294,7 @@ describe("validateForm", () => {
 
     expect(errors).toEqual({
       model: 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5',
+      walkthroughModel: 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5',
       fallbackModels: "At most 3 fallback models",
       categories: "Choose at least one category",
       temperature: "Must be between 0 and 1",

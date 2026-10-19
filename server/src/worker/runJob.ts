@@ -13,6 +13,7 @@ import {
   abortableGenerate,
   createGenerate,
   missingKeys,
+  modelChain,
   type ApiKeys,
   type Endpoint,
   type Generate,
@@ -182,6 +183,14 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     return;
   }
 
+  const walkthrough = walkthroughEnabled(job.trigger, config, changeSet.isDraft);
+  // Only the models this review will call are checked, so a walkthrough or
+  // verify model left set while that pass is off does not fail the job.
+  const primary = [modelChain(config.llm, "review")[0]];
+  if (walkthrough) primary.push(modelChain(config.llm, "walkthrough")[0]);
+  if (config.review.verify !== "off") primary.push(modelChain(config.llm, "verify")[0]);
+  const models = [...new Set(primary)];
+
   const { keys, baseUrls, connections } = await deps.credentialsFor(repo.connection.workspaceId);
   const { connection, baseUrl, endpointKey } = config.llm;
   let endpoint: Endpoint | undefined;
@@ -193,7 +202,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     if (selected.baseUrl) {
       endpoint = { baseUrl: selected.baseUrl, apiKey: selected.apiKey };
     } else {
-      const incompatible = [config.llm.model, ...config.llm.fallbackModels].find(
+      const incompatible = [...models, ...config.llm.fallbackModels].find(
         (model) => model.split("/")[0] !== connection,
       );
       if (incompatible) {
@@ -211,8 +220,9 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   } else {
     throw new Error("No LLM connection selected: choose one in Configuration > LLM Config");
   }
-  if (missingKeys([config.llm.model], keys, endpoint, baseUrls).length > 0) {
-    const provider = config.llm.model.split("/")[0];
+  const unkeyed = models.find((model) => missingKeys([model], keys, endpoint, baseUrls).length > 0);
+  if (unkeyed) {
+    const provider = unkeyed.split("/")[0];
     throw new Error(`No API key for ${provider}: store one in settings or configure it on the server`);
   }
   const warnings = [...loaded.warnings];
@@ -279,7 +289,6 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     }
   }
 
-  const walkthrough = walkthroughEnabled(job.trigger, config, changeSet.isDraft);
   const issues = walkthrough ? await walkthroughIssues(forge, changeSet, config, warnings) : undefined;
   const generate = deps.generateFor(keys, endpoint, baseUrls);
   // Files at the head sha never change, so they share the config file's cache

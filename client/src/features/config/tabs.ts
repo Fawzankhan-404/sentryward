@@ -45,7 +45,7 @@ export function isConfigTab(value: string | null): value is ConfigTab {
 // Which tab shows each validated field, so a tab can flag an error the user
 // cannot see while the save button stays disabled.
 export const TAB_ERRORS: Record<ConfigTab, (keyof FormErrors)[]> = {
-  llm: ["model", "fallbackModels", "connection", "temperature", "maxTokens", "contextBudget"],
+  llm: ["model", "fallbackModels", "walkthroughModel", "verifyModel", "connection", "temperature", "maxTokens", "contextBudget"],
   findings: ["categories", "maxFindings", "minConfidence"],
   files: ["ignorePaths", "maxChunks"],
   display: ["summaryInstructions"],

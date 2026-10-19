@@ -162,6 +162,21 @@ describe("resolveConfig", () => {
   it("rejects an invalid layer", () => {
     expect(() => resolveConfig({ trigger: { review: { maxFindings: 0 } } })).toThrow();
   });
+
+  it("leaves the walkthrough and verify models unset, and records which layer set them", () => {
+    expect(resolveConfig({}).config.llm).toMatchObject({ walkthroughModel: null, verifyModel: null });
+
+    const { config, sources } = resolveConfig({
+      global: { llm: { walkthroughModel: "anthropic/claude-haiku-5-5" } },
+      repoFile: { llm: { verifyModel: "anthropic/claude-opus-5-5" } },
+    });
+    expect(config.llm).toMatchObject({
+      walkthroughModel: "anthropic/claude-haiku-5-5",
+      verifyModel: "anthropic/claude-opus-5-5",
+    });
+    expect(sources).toMatchObject({ "llm.walkthroughModel": "global", "llm.verifyModel": "repoFile" });
+    expect(() => resolveConfig({ trigger: { llm: { verifyModel: "claude-opus" } } })).toThrow(/provider\/model/);
+  });
 });
 
 describe("legacy trigger settings", () => {
@@ -276,6 +291,14 @@ describe("parseRepoFile", () => {
       warnings: [],
     });
     expect(parseRepoFile(".sentryward.yaml", "review:\n  verify: sometimes\n").override).toBeUndefined();
+  });
+
+  it("reads the per-purpose models", () => {
+    const file = "llm:\n  walkthrough_model: anthropic/claude-haiku-5-5\n  verify_model: anthropic/claude-opus-5-5\n";
+    expect(parseRepoFile(".sentryward.yaml", file)).toEqual({
+      override: { llm: { walkthroughModel: "anthropic/claude-haiku-5-5", verifyModel: "anthropic/claude-opus-5-5" } },
+      warnings: [],
+    });
   });
 
   it("ignores the whole file and names an unknown setting in snake_case", () => {

@@ -99,6 +99,9 @@ export interface FormState {
   model: string
   // One model per row, in order; blank rows are not saved and no rows inherits.
   fallbackModels: string[]
+  // "" inherits, which ends at llm.model.
+  walkthroughModel: string
+  verifyModel: string
   // INHERIT in a repository, otherwise a saved provider connection.
   connection: string
   severityFloor: string
@@ -128,6 +131,8 @@ export type FormErrors = Partial<
     | ListName
     | "model"
     | "fallbackModels"
+    | "walkthroughModel"
+    | "verifyModel"
     | "connection"
     | "categories"
     | "ignorePaths"
@@ -199,6 +204,8 @@ export function toForm(settings: ConfigOverride): FormState {
     profile: settings.profile ?? INHERIT,
     model: settings.llm?.model ?? "",
     fallbackModels: [...(settings.llm?.fallbackModels ?? [])],
+    walkthroughModel: settings.llm?.walkthroughModel ?? "",
+    verifyModel: settings.llm?.verifyModel ?? "",
     // endpointKey is the provider reference used by the legacy two-field UI.
     // Reading it here converts that configuration on the next save.
     connection: settings.llm?.connection ?? settings.llm?.endpointKey ?? INHERIT,
@@ -242,6 +249,8 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
     llm: [
       ["model", form.model.trim() || undefined],
       ["fallbackModels", fallbackModels.length ? fallbackModels : undefined],
+      ["walkthroughModel", form.walkthroughModel.trim() || undefined],
+      ["verifyModel", form.verifyModel.trim() || undefined],
       ["connection", pick(form.connection)],
       // New dashboard writes replace the old copied endpoint values.
       ["baseUrl", undefined],
@@ -294,7 +303,10 @@ export function validateForm(form: FormState, connectionRequired = false, savedC
   }
 
   const modelHint = 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5'
-  if (form.model.trim() && !MODEL_PATTERN.test(form.model.trim())) errors.model = modelHint
+  for (const name of ["model", "walkthroughModel", "verifyModel"] as const) {
+    const model = form[name].trim()
+    if (model && !MODEL_PATTERN.test(model)) errors[name] = modelHint
+  }
   const fallbackModels = modelList(form.fallbackModels)
   if (fallbackModels.length > MAX_FALLBACK_MODELS) errors.fallbackModels = `At most ${MAX_FALLBACK_MODELS} fallback models`
   else if (fallbackModels.some((model) => !MODEL_PATTERN.test(model))) errors.fallbackModels = modelHint
