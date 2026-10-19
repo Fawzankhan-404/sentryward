@@ -173,6 +173,17 @@ export async function cancelQueuedForClosedChange(
   return count;
 }
 
+// A person stopping a review. One status check and write, so it cannot race a
+// worker: claimNext only takes queued jobs, and complete() and fail() only
+// finish running ones, so the reason given here is the one that stays.
+export async function cancelJob(id: string, workspaceId: string, reason: string): Promise<number> {
+  const { count } = await prisma.reviewJob.updateMany({
+    where: { id, repository: { connection: { workspaceId } }, status: { in: ["queued", "running"] } },
+    data: { status: "cancelled", error: reason, lockedAt: null, finishedAt: new Date() },
+  });
+  return count;
+}
+
 export async function isCancelled(id: string): Promise<boolean> {
   const job = await prisma.reviewJob.findUnique({ where: { id }, select: { status: true } });
   return job?.status === "cancelled";

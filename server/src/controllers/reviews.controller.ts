@@ -8,7 +8,7 @@ import { parseChangeUrl } from "../review/forge/url.ts";
 import { toJson } from "../review/render/json.ts";
 import { toMarkdown, walkthroughOptions } from "../review/render/markdown.ts";
 import { adapterForConnection, toHttpError } from "../services/forge.ts";
-import { enqueue } from "../worker/queue.ts";
+import { cancelJob, enqueue } from "../worker/queue.ts";
 import {
   createReviewByRepoSchema,
   createReviewSchema,
@@ -289,4 +289,18 @@ export async function rerunReview(req: Request, res: Response) {
   const job = await queueLatest(existing.repository, existing.number);
   const review = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id }, select: listFields });
   res.status(202).json({ review });
+}
+
+export async function cancelReview(req: Request, res: Response) {
+  const { id } = reviewIdParamSchema.parse(req.params);
+  const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { name: true } });
+  const cancelled = await cancelJob(id, req.workspaceId!, `Cancelled by ${user?.name ?? "a workspace member"}`);
+  const review = await prisma.reviewJob.findFirst({ where: { id, ...ownedBy(req.workspaceId!) }, select: listFields });
+  if (!review) {
+    throw new HttpError(404, "Review not found");
+  }
+  if (!cancelled) {
+    throw new HttpError(409, "Only a queued or running review can be cancelled");
+  }
+  res.json({ review });
 }

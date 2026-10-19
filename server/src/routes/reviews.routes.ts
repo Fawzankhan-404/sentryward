@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  cancelReview,
   createReview,
   getReview,
   getReviewMarkdown,
@@ -21,3 +22,4 @@ reviewsRouter.get("/stats", getReviewStats);
 reviewsRouter.get("/:id", getReview);
 reviewsRouter.get("/:id/markdown", getReviewMarkdown);
 reviewsRouter.post("/:id/rerun", rerunReview);
+reviewsRouter.post("/:id/cancel", cancelReview);

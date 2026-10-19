@@ -1,9 +1,9 @@
-// Notices a PR/MR being closed or merged while its review runs, so the worker
-// can stop spending model calls on it and skip publishing. Checks are chained
+// Notices a review being cancelled, or its PR/MR being closed or merged, while
+// it runs, so the worker can stop spending model calls on it and skip publishing. Checks are chained
 // rather than on an interval so a slow forge never has two in flight.
 
 export interface CloseWatch {
-  // Fires once the change is found closed; model calls made through
+  // Fires once the review is found cancelled or the change closed; model calls made through
   // abortableGenerate stop with it.
   signal: AbortSignal;
   // Checks once more, now: the last chance before anything is published.
@@ -13,7 +13,7 @@ export interface CloseWatch {
 
 export const CLOSE_CHECK_INTERVAL_MS = 15_000;
 
-// `isClosed` is any check that can say the change is gone. A failed check
+// `isClosed` is any check that can say the review should stop. A failed check
 // counts as open: a flaky forge must not cancel reviews.
 export function watchForClose(isClosed: () => Promise<boolean>, intervalMs = CLOSE_CHECK_INTERVAL_MS): CloseWatch {
   const controller = new AbortController();
@@ -23,7 +23,7 @@ export function watchForClose(isClosed: () => Promise<boolean>, intervalMs = CLO
   const check = async (): Promise<boolean> => {
     if (controller.signal.aborted) return true;
     const closed = await isClosed().catch(() => false);
-    if (closed) controller.abort(new Error("Review cancelled: the change was closed"));
+    if (closed) controller.abort(new Error("Review cancelled"));
     return closed;
   };
   const schedule = () => {

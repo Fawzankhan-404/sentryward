@@ -226,36 +226,41 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   const ref = changeSet.forgeRef;
   const resolvedConfig = { config, sources: loaded.sources, repoFile: loaded.repoFile };
 
-  // Closing the change cancels its queued jobs from the webhook; this catches
-  // the rest: a close the webhook missed, and one that lands mid-review.
-  const watch = config.triggers.abortOnClose
-    ? watchForClose(
-        async () => {
-          if (await isCancelled(job.id)) return true;
-          const { state } = await forge.getChangeHead(repo.fullPath, job.number);
-          return state === "closed" || state === "merged";
-        },
-        deps.closeCheckIntervalMs ?? CLOSE_CHECK_INTERVAL_MS,
-      )
-    : undefined;
+  // A person can cancel any running job, so it is always watched. Closing the
+  // change cancels its queued jobs from the webhook; with abortOnClose this also
+  // catches the rest: a close the webhook missed, and one that lands mid-review.
+  let cancelledBy: "manual" | "closed" | undefined;
+  const watch = watchForClose(async () => {
+    if (await isCancelled(job.id)) {
+      cancelledBy = "manual";
+      return true;
+    }
+    if (!config.triggers.abortOnClose) return false;
+    const { state } = await forge.getChangeHead(repo.fullPath, job.number);
+    if (state !== "closed" && state !== "merged") return false;
+    cancelledBy = "closed";
+    return true;
+  }, deps.closeCheckIntervalMs ?? CLOSE_CHECK_INTERVAL_MS);
   const cancel = async (posted: boolean) => {
-    watch?.stop();
+    watch.stop();
+    const closed = cancelledBy === "closed";
     // Best effort, and only over what this run already put on the change.
     if (posted && config.output.postCheck) {
-      await forge
-        .setCommitStatus(ref, { state: "error", description: "Review cancelled: the change was closed", targetUrl })
-        .catch(() => undefined);
+      const description = closed ? "Review cancelled: the change was closed" : "Review cancelled";
+      await forge.setCommitStatus(ref, { state: "error", description, targetUrl }).catch(() => undefined);
     }
+    // A manual cancel already stored its reason and status, so this only
+    // finishes a job the change being closed stopped.
     await complete(job.id, {
       status: "cancelled",
       verdict: null,
       resolvedConfig,
-      error: CLOSED_REASON,
+      error: closed ? CLOSED_REASON : "Review cancelled",
       headSha: ref.headSha,
       baseSha: ref.baseSha,
     });
   };
-  if (watch && (await watch.closedNow())) {
+  if (await watch.closedNow()) {
     await cancel(false);
     return;
   }
@@ -344,13 +349,13 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
         increment,
         toolAnnotations: tools,
       },
-      { generate: watch ? abortableGenerate(generate, watch.signal) : generate, context },
+      { generate: abortableGenerate(generate, watch.signal), context },
     );
   } finally {
-    watch?.stop();
+    watch.stop();
   }
-  // Nothing is published for a change that is no longer open.
-  if (watch && (await watch.closedNow())) {
+  // Nothing is published for a review cancelled or a change no longer open.
+  if (await watch.closedNow()) {
     await cancel(publishes(config));
     return;
   }
