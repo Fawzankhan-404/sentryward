@@ -29,6 +29,8 @@ const schema: ConfigSchema = {
       disableCache: false,
       fileContext: true,
       verify: "blocking",
+      toolFindings: true,
+      toolFindingsBlock: false,
     },
     output: {
       walkthrough: true,

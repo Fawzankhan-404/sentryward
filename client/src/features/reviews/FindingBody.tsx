@@ -14,9 +14,14 @@ export function FindingBody({ finding, change }: { finding: Finding; change: Rev
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{finding.category}</Badge>
         {finding.kind !== "potential_issue" && <Badge variant="outline">{finding.kind.replace(/_/g, " ")}</Badge>}
-        <span className="text-xs text-muted-foreground">
-          Confidence {Math.round(finding.confidence * 100)}% · {finding.effort.replace(/_/g, " ")}
-        </span>
+        {/* An analyzer's result has no confidence of its own; name the analyzer instead. */}
+        {finding.source === "tool" ? (
+          <Badge variant="secondary">via {finding.tool ?? "static analysis"}</Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            Confidence {Math.round(finding.confidence * 100)}% · {finding.effort.replace(/_/g, " ")}
+          </span>
+        )}
         <a
           href={forgeFileUrl(change, finding.file, finding.startLine, finding.endLine)}
           target="_blank"

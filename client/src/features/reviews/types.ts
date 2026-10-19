@@ -40,7 +40,8 @@ export interface Finding {
   evidence: string
   evidenceNote: string
   evidenceFiles: string[]
-  source: "llm" | "static" | "rule"
+  source: "llm" | "tool" | "rule"
+  tool?: string
   fingerprint: string
   bucket: Bucket
 }

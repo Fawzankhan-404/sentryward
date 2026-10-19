@@ -70,6 +70,15 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Committable suggestions",
     description: "Offer fixes as suggestions that can be applied from the forge.",
   },
+  toolFindings: {
+    label: "Static analysis findings",
+    description:
+      "Report what analyzers already found on changed lines: GitHub check run annotations, GitLab Code Quality and SAST reports.",
+  },
+  toolFindingsBlock: {
+    label: "Static analysis can block",
+    description: "Let static analysis findings at or above the blocking severity fail the review.",
+  },
   fileContext: {
     label: "Surrounding code",
     description:
@@ -816,6 +825,7 @@ export function ConfigFields(props: {
   const postSummaryOn = shownFlag("postSummary")
   const postInlineOn = shownFlag("postInline")
   const reviewOnPushOn = shownFlag("reviewOnPush")
+  const toolFindingsOn = shownFlag("toolFindings")
   const highLevelSummaryOn = walkthroughOn && shownFlag("highLevelSummary")
   const inheritedSummaryInstructions = inherited?.output.highLevelSummaryInstructions
 
@@ -1000,6 +1010,8 @@ export function ConfigFields(props: {
             {toggles(["requireEvidence", "suppressIgnored", "fullFile", "fileContext", "committableSuggestions"])}
           </ToggleList>
           {choiceField("verify")}
+          <ToggleList>{toggles(["toolFindings"])}</ToggleList>
+          <ToggleList>{toggles(["toolFindingsBlock"], !toolFindingsOn)}</ToggleList>
         </Section>
       </>
     ),

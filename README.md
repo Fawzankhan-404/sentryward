@@ -292,7 +292,7 @@ Read [SECURITY.md](SECURITY.md) before exposing an instance.
 **GitHub**: create a GitHub App (Settings, Developer settings, GitHub Apps) and put its details in `.env`:
 
 - Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Sentryward uses that OAuth code to confirm the installing user can actually access the installation.
-- Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Issues (read), Metadata (read). Issues is used for linked and related issues in the walkthrough; without it those parts are skipped with a warning.
+- Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Issues (read), Checks (read), Metadata (read). Issues is used for linked and related issues in the walkthrough; without it those parts are skipped with a warning. Checks is used for [static analysis findings](#static-analysis-findings); without it they are skipped with a warning.
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
 - Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment** and **Installation**.
 
@@ -388,6 +388,8 @@ review:
   file_context: true        # show passes the surrounding code, definitions and callers
   verify: blocking          # off | blocking | all: re-check findings with a second model call;
                             # refuted ones are dropped, uncertain ones demoted (fast profile: off)
+  tool_findings: true       # report static analysis results already on the forge as findings
+  tool_findings_block: false  # let those findings reach block_on and fail the verdict
 output:
   walkthrough: true
   post_inline: true
@@ -425,6 +427,15 @@ language_instructions:
 ```
 
 </details>
+
+### Static analysis findings
+
+Sentryward does not run analyzers itself. With `review.tool_findings` on (the default), it reads the results that already exist on the forge for the reviewed commit and reports them next to the model's findings, marked with the analyzer's name:
+
+- **GitHub:** annotations of the head commit's finished check runs, such as linters run in Actions or CodeQL. This needs the Checks (read) permission. Checks still running when the review starts are left out, with a warning.
+- **GitLab:** the Code Quality (`gl-code-quality-report.json`) and SAST (`gl-sast-report.json`) reports of the head commit's pipeline. GitLab's API only serves files from a job's artifacts archive, so list the report under `artifacts:paths` as well as `artifacts:reports`. Otherwise it is skipped with a warning.
+
+Only results on lines the change added are kept (or anywhere in a changed file, with `review.full_file`). They then pass the same category, `severity_floor`, dismissal and `max_findings` rules as model findings. Severity follows the analyzer's level: a GitHub failure is `major`, a warning `minor` and a notice `info`. A warning is filed under `maintainability`, which is not a default category, so linter warnings only appear when that category is enabled. When the model reported the same problem (same file and category, overlapping lines), the model's finding is kept. Tool findings never block unless `review.tool_findings_block` is on, because the analyzer's own check already passes or fails on the forge. If the results cannot be read (a missing permission, an unreachable report), the review continues with a warning.
 
 ## API
 
