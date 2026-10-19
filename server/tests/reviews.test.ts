@@ -6,6 +6,7 @@ import { encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { summarize } from "../src/review/render/json.ts";
 import { toMarkdown } from "../src/review/render/markdown.ts";
+import { claimNext } from "../src/worker/queue.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
 import { sampleResult } from "./helpers/result.ts";
 import { createUser } from "./helpers/users.ts";
@@ -360,5 +361,51 @@ describe("POST /api/reviews/:id/rerun", () => {
     expect(res.status).toBe(202);
     expect(res.body.review.id).not.toBe(job.id);
     expect(res.body.review).toMatchObject({ number: 7, headSha: "newsha", status: "queued" });
+  });
+});
+
+describe("POST /api/reviews/:id/cancel", () => {
+  const job = (status: "queued" | "running" | "completed" | "failed" | "cancelled") =>
+    prisma.reviewJob.create({ data: { repositoryId: repoId, number: 7, headSha: "h", trigger: "manual", status } });
+
+  it("cancels a queued review so no worker claims it", async () => {
+    const queued = await job("queued");
+
+    const res = await request(app).post(`/api/reviews/${queued.id}/cancel`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.review).toMatchObject({ id: queued.id, status: "cancelled" });
+    expect(res.body.review.error).toBe("Cancelled by Dev");
+    expect(await claimNext()).toBeNull();
+  });
+
+  it("cancels a running review and records who and when", async () => {
+    const running = await job("running");
+
+    const res = await request(app).post(`/api/reviews/${running.id}/cancel`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: running.id } });
+    expect(stored).toMatchObject({ status: "cancelled", error: "Cancelled by Dev", lockedAt: null });
+    expect(stored.finishedAt).not.toBeNull();
+  });
+
+  it("409s for a review that already finished", async () => {
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      const finished = await job(status);
+      const res = await request(app).post(`/api/reviews/${finished.id}/cancel`).set("Cookie", cookie);
+      expect(res.status).toBe(409);
+      expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: finished.id } })).status).toBe(status);
+    }
+  });
+
+  it("404s for another workspace's review and leaves it running", async () => {
+    const queued = await job("queued");
+    const other = await createUser("other@example.com");
+
+    const res = await request(app).post(`/api/reviews/${queued.id}/cancel`).set("Cookie", other.cookie);
+
+    expect(res.status).toBe(404);
+    expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: queued.id } })).status).toBe("queued");
   });
 });

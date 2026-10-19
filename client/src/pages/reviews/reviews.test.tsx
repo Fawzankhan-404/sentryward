@@ -193,6 +193,36 @@ describe("Reviews page rows, filters and stats", () => {
     expect(rerun).not.toHaveBeenCalled()
   })
 
+  it("cancels a running review from the row menu after confirming", async () => {
+    const running = { ...listItem, status: "running" as const, verdict: null }
+    const cancel = vi.fn(() => jsonResponse(200, { review: { ...running, status: "cancelled" } }))
+    mockApi({
+      "GET /api/reviews?view=changes&page=1&limit=10": firstPage([running]),
+      [`POST /api/reviews/${listItem.id}/cancel`]: cancel,
+    })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Add b and c" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Cancel review" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Cancel review of Add b and c?" })
+    expect(cancel).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel review" }))
+
+    expect(await screen.findByText("Review cancelled")).toBeInTheDocument()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it("offers no cancel for a review that has finished", async () => {
+    mockApi({ "GET /api/reviews?view=changes&page=1&limit=10": firstPage([listItem]) })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Add b and c" }))
+
+    expect(await screen.findByRole("menuitem", { name: "Re-run" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Cancel review" })).not.toBeInTheDocument()
+  })
+
   it("filters on the server and starts over at page 1", async () => {
     mockApi({
       "GET /api/reviews?view=changes&page=2&limit=10": firstPage([listItem], 12),
@@ -428,5 +458,40 @@ describe("Review detail page", () => {
 
     expect(await screen.findByText("The review did not run")).toBeInTheDocument()
     expect(screen.getByText("No API key for anthropic")).toBeInTheDocument()
+  })
+
+  it("cancels a queued review from the header", async () => {
+    const cancel = vi.fn(() => jsonResponse(200, { review: { ...detail, status: "cancelled" } }))
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: { ...detail, status: "queued", verdict: null, result: null } },
+      [`POST /api/reviews/${detail.id}/cancel`]: cancel,
+    })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel review" }))
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+  })
+
+  it("has no cancel button once a review has finished", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    expect(await screen.findByRole("button", { name: "Re-run" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument()
+  })
+
+  it("says why a review was cancelled", async () => {
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: {
+        review: { ...detail, status: "cancelled", verdict: null, result: null, error: "Cancelled by Dev" },
+      },
+    })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("Cancelled")).toBeInTheDocument()
+    expect(within(alert).getByText("Cancelled by Dev")).toBeInTheDocument()
   })
 })

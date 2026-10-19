@@ -5,7 +5,7 @@ import { ForgeCache } from "../src/review/forge/cache.ts";
 import { ForgeError } from "../src/review/forge/http.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
-import { claimNext, enqueue } from "../src/worker/queue.ts";
+import { cancelJob, claimNext, enqueue } from "../src/worker/queue.ts";
 import { runJob, skipReason, walkthroughEnabled, type RunJobDeps } from "../src/worker/runJob.ts";
 import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
 import { fingerprint } from "../src/review/core/fingerprint.ts";
@@ -14,6 +14,7 @@ import { APP_PATCH, makeChangeSet } from "./helpers/changeSet.ts";
 import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
 
 let repositoryId: string;
+let workspaceId: string;
 
 // The fingerprint the default modelFinding() gets after validation (its kind is
 // not demoted, as it carries real evidence), used to seed a prior dismissal.
@@ -57,6 +58,7 @@ beforeEach(async () => {
   const workspace = await prisma.workspace.create({
     data: { name: "W", reviewSettings: { llm: { connection: "anthropic" } } },
   });
+  workspaceId = workspace.id;
   const connection = await prisma.forgeConnection.create({
     data: { workspaceId: workspace.id, provider: "github", host: "github.com", kind: "github_app", installationId: "1", accountLogin: "acme" },
   });
@@ -632,6 +634,37 @@ describe("runJob when the change closes", () => {
     expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled");
     expect(await prisma.finding.count()).toBe(0);
   });
+});
+
+describe("runJob when cancelled from the dashboard", () => {
+  const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+
+  for (const abortOnClose of [true, false]) {
+    it(`stops model calls and publishes nothing with abort on close ${abortOnClose ? "on" : "off"}`, async () => {
+      await prisma.repository.update({ where: { id: repositoryId }, data: { settings: { triggers: { abortOnClose } } } });
+      const job = await claimedJob();
+      const { runDeps, model, published } = deps({}, answers);
+      runDeps.closeCheckIntervalMs = 5;
+      const signals: (AbortSignal | undefined)[] = [];
+      runDeps.generateFor = () => async (request) => {
+        signals.push(request.abortSignal);
+        await cancelJob(job.id, workspaceId, "Cancelled by Dev");
+        // Slower than the watch, so the cancel lands mid-call.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return model.generate(request);
+      };
+
+      await runJob(job, runDeps);
+
+      const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+      expect(stored).toMatchObject({ status: "cancelled", verdict: null, error: "Cancelled by Dev" });
+      expect(signals.length).toBeGreaterThan(0);
+      expect(signals.every((signal) => signal?.aborted)).toBe(true);
+      expect(published.inline).toEqual([]);
+      expect(published.summaries).toHaveLength(1);
+      expect(published.statuses).toEqual(["pending", "error"]);
+    });
+  }
 });
 
 describe("runJob issues and cache", () => {
