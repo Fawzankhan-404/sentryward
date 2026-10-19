@@ -1,0 +1,6 @@
+name: sentryward CodeQL
+
+paths-ignore:
+  # Deliberately vulnerable code the reviewer is evaluated against; alerts here
+  # are the expected findings, not bugs.
+  - server/evals/cases
