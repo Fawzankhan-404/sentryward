@@ -79,7 +79,7 @@ Open http://localhost:5173, register, then follow
 
 ## How it works
 
-The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings, re-checks blocking ones with a second model call (`review.verify`) and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository's workspace has stored its own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
+The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings, re-checks blocking ones with a second model call (`review.verify`; `llm.walkthrough_model` and `llm.verify_model` can point those two calls at a different model than the review passes) and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository's workspace has stored its own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
 
 ## Getting started
 
@@ -371,6 +371,8 @@ profile: balanced
 llm:
   model: anthropic/claude-sonnet-5-5   # provider/model: anthropic, openai or google
   fallback_models: []
+  walkthrough_model: null   # model for the walkthrough; null uses model
+  verify_model: null        # model for review.verify; null uses model (fallbacks are shared)
   temperature: 0.2
   max_tokens: 8000
 review:

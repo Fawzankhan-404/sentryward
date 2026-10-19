@@ -21,6 +21,10 @@ const modelString = z
 const llmShape = {
   model: modelString,
   fallbackModels: z.array(modelString).max(3),
+  // Per-purpose models; null uses `model`. The fallbacks are shared, so a
+  // cheaper walkthrough or stronger verifier still has somewhere to go.
+  walkthroughModel: modelString.nullable(),
+  verifyModel: modelString.nullable(),
   temperature: z.number().min(0).max(1),
   maxTokens: z.number().int().min(1000).max(64000),
   // Prompt token ceiling; null derives it from the model's context window.
@@ -191,6 +195,8 @@ export const DEFAULT_CONFIG: Config = {
   llm: {
     model: "anthropic/claude-sonnet-5-5",
     fallbackModels: [],
+    walkthroughModel: null,
+    verifyModel: null,
     temperature: 0.2,
     maxTokens: 8000,
     contextBudget: null,

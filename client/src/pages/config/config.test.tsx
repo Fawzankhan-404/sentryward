@@ -10,6 +10,8 @@ const effective = {
   llm: {
     model: "anthropic/claude-sonnet-5-5",
     fallbackModels: [],
+    walkthroughModel: null,
+    verifyModel: null,
     temperature: 0.2,
     maxTokens: 8000,
     contextBudget: null,

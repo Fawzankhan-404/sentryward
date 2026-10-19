@@ -8,7 +8,7 @@ import {
   walkthroughUserPrompt,
   type WalkthroughExtras,
 } from "./prompt.ts";
-import { generateWithFallback, type Generate } from "./providers.ts";
+import { generateWithFallback, modelChain, type Generate } from "./providers.ts";
 import { repairWalkthroughOutput, walkthroughSchemaFor, type FullWalkthroughOutput } from "./schemas.ts";
 
 // The overview needs breadth, not every line: files are included whole until
@@ -76,7 +76,7 @@ export async function generateWalkthrough(
     linkedIssues: !!linked,
     relatedIssues: !!candidates,
   });
-  const response = await generateWithFallback(generate, [config.llm.model, ...config.llm.fallbackModels], {
+  const response = await generateWithFallback(generate, modelChain(config.llm, "walkthrough"), {
     system: WALKTHROUGH_SYSTEM_PROMPT,
     prompt: walkthroughUserPrompt(changeSet, overviewDiff(files), extras),
     schema,

@@ -685,7 +685,7 @@ export function ConfigFields(props: {
       The {LLM_PROVIDERS[officialProvider].label} connection can only run {officialProvider}/... models.
     </FieldDescription>
   )
-  type TextKey = "profile" | "model" | "severityFloor" | "blockOn" | "ignorePaths" | "instructions"
+  type TextKey = "profile" | "model" | "walkthroughModel" | "verifyModel" | "severityFloor" | "blockOn" | "ignorePaths" | "instructions"
   const setField = (key: TextKey) => (value: string) => props.onChange({ ...form, [key]: value })
   const setFlag = (name: FlagName) => (value: boolean | undefined) =>
     props.onChange({ ...form, flags: { ...form.flags, [name]: value } })
@@ -738,6 +738,31 @@ export function ConfigFields(props: {
   function emptyHint(path: string, value: unknown) {
     if (isRepo) return `Leave empty to inherit${inherited ? ` ${inheritedHint(path, value)}` : ""}.`
     return `Leave empty to use the default${inherited ? ` (${describe(value, undefined)})` : ""}.`
+  }
+
+  // A model for one purpose; empty falls through the layers and then to llm.model.
+  function purposeModelField(name: "walkthroughModel" | "verifyModel", label: string) {
+    const path = `llm.${name}`
+    const shown = (llm: EffectiveConfig["llm"]) => llm[name] ?? `same as model (${llm.model})`
+    return (
+      <Field data-disabled={disabled}>
+        <FieldLabel htmlFor={name}>{label}</FieldLabel>
+        <ModelCombobox
+          id={name}
+          aria-label={label}
+          value={form[name]}
+          onChange={setField(name)}
+          placeholder={inherited ? shown(inherited.llm) : config ? shown(config.llm) : "Same as model"}
+          disabled={disabled}
+          aria-invalid={errors[name] ? true : undefined}
+          suggestions={modelSuggestions}
+        />
+        <FieldDescription>{emptyHint(path, inherited && shown(inherited.llm))}</FieldDescription>
+        {config && <FieldDescription className="text-xs">{effective(path, shown(config.llm))}</FieldDescription>}
+        {!disabled && !runsOn(form[name]) && mismatchHint}
+        {errors[name] && <FieldError>{errors[name]}</FieldError>}
+      </Field>
+    )
   }
 
   function choiceField(name: ChoiceName, off = false) {
@@ -912,7 +937,10 @@ export function ConfigFields(props: {
           </div>
         </Section>
         <FieldSeparator />
-        <Section title="Models" description="The model that reviews the change, and the ones tried when it fails.">
+        <Section
+          title="Models"
+          description="The model that reviews the change, the ones tried when it fails, and optional models for the walkthrough and verification."
+        >
           <div className="grid gap-4 @md/field-group:grid-cols-2">
             <Field data-disabled={disabled}>
               <FieldLabel htmlFor="model">Model</FieldLabel>
@@ -945,6 +973,8 @@ export function ConfigFields(props: {
               suggestions={modelSuggestions}
               warning={!disabled && !form.fallbackModels.every(runsOn) ? mismatchHint : undefined}
             />
+            {purposeModelField("walkthroughModel", "Walkthrough model")}
+            {purposeModelField("verifyModel", "Verification model")}
           </div>
         </Section>
         <FieldSeparator />

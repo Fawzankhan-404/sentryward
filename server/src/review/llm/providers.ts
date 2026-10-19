@@ -3,6 +3,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, NoObjectGeneratedError, Output, type LanguageModel } from "ai";
 import type { z } from "zod";
+import type { Config } from "../config/schema.ts";
 import { excerpt, formatInstruction, parseLenient } from "./format.ts";
 
 export const PROVIDERS = ["anthropic", "openai", "google", "ollama"] as const;
@@ -163,6 +164,16 @@ function message(err: unknown): string {
 
 // Tries the primary model, then each fallback in order. Every model's error is
 // kept so the primary's failure is not hidden behind the last fallback's.
+export type ModelPurpose = "review" | "walkthrough" | "verify";
+
+// The models a call tries, in order: the purpose's own model when one is set,
+// otherwise `model`, then the shared fallbacks.
+export function modelChain(llm: Config["llm"], purpose: ModelPurpose): string[] {
+  const primary =
+    (purpose === "walkthrough" ? llm.walkthroughModel : purpose === "verify" ? llm.verifyModel : null) ?? llm.model;
+  return [...new Set([primary, ...llm.fallbackModels])];
+}
+
 export async function generateWithFallback<T>(
   generate: Generate,
   models: string[],

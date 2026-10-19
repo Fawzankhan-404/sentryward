@@ -15,6 +15,9 @@ export interface ConfigOverride {
   llm?: {
     model?: string
     fallbackModels?: string[]
+    // Per-purpose models; unset or null uses model.
+    walkthroughModel?: string | null
+    verifyModel?: string | null
     temperature?: number
     maxTokens?: number
     contextBudget?: number | null
@@ -87,6 +90,9 @@ export interface EffectiveConfig {
   llm: {
     model: string
     fallbackModels: string[]
+    // null uses model.
+    walkthroughModel: string | null
+    verifyModel: string | null
     temperature: number
     maxTokens: number
     // null derives the prompt budget from the model's context window.

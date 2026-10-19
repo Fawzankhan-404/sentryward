@@ -383,6 +383,37 @@ describe("generateWithFallback", () => {
 });
 
 describe("runReview", () => {
+  it("calls each purpose's own model, falling back to llm.model when unset", async () => {
+    const changeSet = makeChangeSet();
+    const respond = {
+      code_review: { findings: [modelFinding({ severity: "critical" })] },
+      walkthrough: WALKTHROUGH,
+      verification: { verdict: "confirmed", reason: "Reachable." },
+    };
+    const modelsBySchema = (requests: { schemaName: string; model: string }[]) =>
+      Object.fromEntries(requests.map((request) => [request.schemaName, request.model]));
+
+    const split = fakeModel(respond);
+    await runReview(
+      {
+        changeSet,
+        config: config({
+          llm: { walkthroughModel: "anthropic/claude-haiku-5-5", verifyModel: "anthropic/claude-opus-5-5" },
+        }),
+      },
+      { generate: split.generate },
+    );
+    expect(modelsBySchema(split.requests)).toEqual({
+      code_review: "anthropic/claude-sonnet-5-5",
+      walkthrough: "anthropic/claude-haiku-5-5",
+      verification: "anthropic/claude-opus-5-5",
+    });
+
+    const shared = fakeModel(respond);
+    await runReview({ changeSet, config: config() }, { generate: shared.generate });
+    expect(new Set(shared.requests.map((request) => request.model))).toEqual(new Set(["anthropic/claude-sonnet-5-5"]));
+  });
+
   const now = () => new Date("2026-10-04T12:00:00Z");
 
   it("produces a completed, blocked result with walkthrough and usage", async () => {

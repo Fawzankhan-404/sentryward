@@ -373,6 +373,31 @@ describe("runJob", () => {
     await expect(runJob(job, runDeps)).rejects.toThrow(/anthropic LLM connection.*cannot run model openai\/gpt-5/);
   });
 
+  it("rejects a verify model that cannot use the selected official connection", async () => {
+    const job = await claimedJob();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { llm: { verifyModel: "openai/gpt-5" } } },
+    });
+    const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await expect(runJob(job, runDeps)).rejects.toThrow(/anthropic LLM connection.*cannot run model openai\/gpt-5/);
+  });
+
+  it("ignores a verify model it cannot run while verification is off", async () => {
+    const job = await claimedJob();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { llm: { verifyModel: "openai/gpt-5" }, review: { verify: "off" } } },
+    });
+    const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.status).toBe("completed");
+  });
+
   it("sends every model call to the endpoint with the chosen key", async () => {
     const job = await claimedJob();
     const baseUrl = "http://host.docker.internal:20128/v1";
