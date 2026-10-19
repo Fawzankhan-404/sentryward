@@ -26,6 +26,7 @@ export const FLAGS = [
   { name: "relatedIssues", section: "output" },
   { name: "highLevelSummary", section: "output" },
   { name: "reviewOnPush", section: "triggers" },
+  { name: "fullReviewOnPush", section: "triggers" },
   { name: "command", section: "triggers" },
   { name: "abortOnClose", section: "triggers" },
 ] as const

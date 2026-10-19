@@ -54,6 +54,7 @@ const effective = {
   triggers: {
     review: "published",
     reviewOnPush: true,
+    fullReviewOnPush: false,
     summary: "published",
     command: true,
     abortOnClose: true,
