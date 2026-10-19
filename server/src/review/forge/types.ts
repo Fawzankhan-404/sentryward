@@ -1,5 +1,6 @@
 import type { ChangeSet, ForgeProvider, ForgeRef, IssueContext } from "../core/models.ts";
 import type { ForgeCache } from "./cache.ts";
+import type { ToolResults } from "./toolResults.ts";
 
 export interface ForgeRepo {
   externalId: string;
@@ -65,6 +66,11 @@ export interface ForgeAdapter {
   // or is not an ancestor of `to` (a force push or rebase), or when the forge
   // cut the list short. Fixed by the two shas, so read through the cache.
   compareCommits(project: string, from: string, to: string, cache?: ForgeCache): Promise<string[] | null>;
+  // What static analyzers already reported for the change's head revision:
+  // check run annotations on GitHub, Code Quality and SAST reports from the
+  // head pipeline on GitLab. No checks or pipeline is an empty result, not an
+  // error; a missing permission throws.
+  getToolAnnotations(ref: ForgeRef): Promise<ToolResults>;
 }
 
 // GitHub's compare endpoint lists at most this many files and says nothing

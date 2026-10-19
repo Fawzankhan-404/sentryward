@@ -3,7 +3,7 @@ import { fingerprintMarker } from "../core/markers.ts";
 import { FORGE_INFO } from "../forge/providers.ts";
 import type { InlineComment } from "../forge/types.ts";
 import { agentPromptBlock, findingPrompt } from "../render/agentPrompt.ts";
-import { BRAND_FOOTER, SEVERITY_ICON, sanitize } from "../render/markdown.ts";
+import { BRAND_FOOTER, SEVERITY_ICON, sanitize, toolSuffix } from "../render/markdown.ts";
 
 function fence(code: string, info: string): string {
   const longest = Math.max(2, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
@@ -18,7 +18,7 @@ export interface InlineOptions {
 
 export function inlineBody(finding: Finding, provider: ForgeProvider, options: InlineOptions = {}): string {
   const lines = [
-    `${SEVERITY_ICON[finding.severity]} **${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}`,
+    `${SEVERITY_ICON[finding.severity]} **${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}${toolSuffix(finding)}`,
     "",
     `**${sanitize(finding.title)}**`,
     "",

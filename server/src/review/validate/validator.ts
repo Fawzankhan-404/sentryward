@@ -1,7 +1,7 @@
 import type { Config } from "../config/schema.ts";
 import { bucketFor } from "../core/buckets.ts";
 import { fingerprint } from "../core/fingerprint.ts";
-import { isAddedLine, type ChangedFile, type ChangeSet, type Finding } from "../core/models.ts";
+import { isAddedLine, type ChangedFile, type ChangeSet, type Finding, type ToolAnnotation } from "../core/models.ts";
 import { atLeast, severityRank } from "../core/severity.ts";
 import type { ModelFinding } from "../llm/schemas.ts";
 
@@ -68,7 +68,13 @@ export function demoteFinding(finding: Finding, changeSet: ChangeSet): Finding {
     ...finding,
     severity: severityRank(finding.severity) < severityRank("minor") ? finding.severity : "minor",
     kind,
-    fingerprint: fingerprint({ file: finding.file, category: finding.category, kind, title: finding.title }),
+    fingerprint: fingerprint({
+      file: finding.file,
+      category: finding.category,
+      kind,
+      title: finding.title,
+      ruleId: finding.ruleId,
+    }),
     bucket: bucketFor({ file: finding.file, startLine: finding.startLine, kind }, changeSet),
   };
 }
@@ -204,4 +210,93 @@ export function validateFindings(
   if (overLimit > 0) dropped.over_limit = overLimit;
 
   return { findings: sorted.slice(0, config.review.maxFindings), dropped, demoted };
+}
+
+// Analyzer results are held to the same file, category, floor and dismissal
+// rules as model findings, but their lines are exact: one that is not on an
+// added line is about code the change did not touch, so it is never snapped.
+// Nor is it judged on confidence or evidence; the analyzer ran. The cap is
+// applied by the caller, across tool and model findings together.
+export function validateToolFindings(
+  annotations: ToolAnnotation[],
+  changeSet: ChangeSet,
+  reviewed: ChangedFile[],
+  config: Config,
+  ignoredFingerprints?: ReadonlySet<string>,
+): ValidationResult {
+  const dropped: Partial<Record<DropReason, number>> = {};
+  const drop = (reason: DropReason) => {
+    dropped[reason] = (dropped[reason] ?? 0) + 1;
+  };
+  const files = new Map(reviewed.map((file) => [file.path, file]));
+  const categories = new Set(config.review.categories);
+  const kept = new Map<string, Finding>();
+
+  for (const annotation of annotations) {
+    const start = annotation.startLine;
+    if (!Number.isInteger(start) || start < 1) {
+      drop("invalid_line");
+      continue;
+    }
+    const file = files.get(annotation.file);
+    if (!file) {
+      drop("unknown_file");
+      continue;
+    }
+    if (!categories.has(annotation.category)) {
+      drop("category");
+      continue;
+    }
+    if (!isAddedLine(file, start) && !config.review.fullFile) {
+      drop("off_diff");
+      continue;
+    }
+    if (!atLeast(annotation.severity, config.review.severityFloor)) {
+      drop("below_floor");
+      continue;
+    }
+    const title = annotation.title.trim().slice(0, 200);
+    const body = annotation.message.trim();
+    if (!title || !body) {
+      drop("empty");
+      continue;
+    }
+
+    const kind = "potential_issue";
+    const ruleId = annotation.ruleId?.trim() || undefined;
+    const finding: Finding = {
+      file: file.path,
+      startLine: start,
+      endLine: clampEnd(file, start, Number.isInteger(annotation.endLine) ? annotation.endLine : start),
+      severity: annotation.severity,
+      category: annotation.category,
+      kind,
+      effort: "quick_win",
+      title,
+      body,
+      confidence: 1,
+      evidence: "static_tool",
+      evidenceNote: `Reported by ${annotation.tool}${ruleId ? ` (${ruleId})` : ""}`,
+      evidenceFiles: [],
+      source: "tool",
+      tool: annotation.tool,
+      ...(ruleId ? { ruleId } : {}),
+      // An analyzer words a result the same way every run, so its message is
+      // part of the identity: one rule reporting two different problems in a
+      // file stays two findings. The same message twice in a file is reported
+      // once, as with model findings.
+      fingerprint: fingerprint({ file: file.path, category: annotation.category, kind, title: `${title} ${body}`, ruleId }),
+      bucket: bucketFor({ file: file.path, startLine: start, kind }, changeSet),
+    };
+
+    if (ignoredFingerprints?.has(finding.fingerprint)) {
+      drop("previously_ignored");
+      continue;
+    }
+    const existing = kept.get(finding.fingerprint);
+    if (existing) drop("duplicate");
+    kept.set(finding.fingerprint, existing ? stronger(existing, finding) : finding);
+  }
+
+  return { findings: [...kept.values()].sort(compareFindings), dropped, demoted: 0 };
 }

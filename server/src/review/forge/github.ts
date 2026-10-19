@@ -5,6 +5,7 @@ import { ForgeError, ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } fro
 import { cacheKey, cached, type ForgeCache } from "./cache.ts";
 import { githubApiBase } from "./githubApp.ts";
 import { closingIssueNumbers, MAX_CANDIDATE_ISSUES } from "./issues.ts";
+import { fromGitHubAnnotation, MAX_TOOL_ANNOTATIONS, type GhAnnotation, type ToolResults } from "./toolResults.ts";
 import {
   hostOrigin,
   STATUS_CONTEXT,
@@ -77,6 +78,16 @@ interface GhComparison {
 
 // GitHub caps the files endpoint at 3000 files, 100 per page.
 const MAX_FILE_PAGES = 30;
+
+interface GhCheckRun {
+  id: number;
+  name: string;
+  status: "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
+  output: { annotations_count: number };
+}
+
+// A commit rarely has more than a few dozen check runs.
+const MAX_CHECK_RUN_PAGES = 3;
 
 function changeTypeOf(status: GhFile["status"]): ChangeType {
   switch (status) {
@@ -363,6 +374,46 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       if (files.length >= MAX_COMPARE_FILES) return null;
       return [...new Set(files.flatMap((file) => (file.previous_filename ? [file.filename, file.previous_filename] : [file.filename])))];
     });
+  }
+
+  // Check runs need the Checks (read) permission; without it GitHub answers
+  // 403 (or 404 for a token), which the caller reports as a warning. Only
+  // finished runs are read: a running one may not have annotated yet.
+  async getToolAnnotations(ref: ForgeRef): Promise<ToolResults> {
+    const repoPath = repoApiPath(ref.project);
+    const runs = await this.http.paginate<GhCheckRun>(
+      `${repoPath}/commits/${encodeURIComponent(ref.headSha)}/check-runs?per_page=100`,
+      linkHeaderNext,
+      MAX_CHECK_RUN_PAGES,
+      (body) => (body as { check_runs: GhCheckRun[] }).check_runs,
+    );
+    const warnings: string[] = [];
+    const running = runs.filter((run) => run.status !== "completed");
+    if (running.length > 0) {
+      const names = running.map((run) => run.name).join(", ");
+      warnings.push(`Checks still running when the review started were left out: ${names}`);
+    }
+
+    const annotations: ToolResults["annotations"] = [];
+    for (const run of runs) {
+      if (run.status !== "completed" || run.output.annotations_count === 0) continue;
+      if (annotations.length >= MAX_TOOL_ANNOTATIONS) break;
+      // The run's name, not its app's: every Actions job belongs to the app
+      // "GitHub Actions", while the run is named after the job ("lint",
+      // "CodeQL").
+      const tool = run.name;
+      const pages = Math.ceil(Math.min(run.output.annotations_count, MAX_TOOL_ANNOTATIONS) / 100);
+      const found = await this.http.paginate<GhAnnotation>(
+        `${repoPath}/check-runs/${run.id}/annotations?per_page=100`,
+        linkHeaderNext,
+        pages,
+      );
+      for (const annotation of found) {
+        const mapped = fromGitHubAnnotation(tool, annotation);
+        if (mapped) annotations.push(mapped);
+      }
+    }
+    return { annotations: annotations.slice(0, MAX_TOOL_ANNOTATIONS), warnings };
   }
 
   private isSelf(comment: GhComment): boolean {

@@ -4,9 +4,10 @@ import { prisma } from "../lib/prisma.ts";
 import { skipFilterReason } from "../review/config/filters.ts";
 import { loadDashboardConfig, loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
-import type { ChangeSet, RejectedFinding } from "../review/core/models.ts";
+import type { ChangeSet, RejectedFinding, ToolAnnotation } from "../review/core/models.ts";
 import type { ContextSource } from "../review/context/gather.ts";
 import { cacheKey, cached, forgeCache, type ForgeCache } from "../review/forge/cache.ts";
+import { ForgeError } from "../review/forge/http.ts";
 import { searchTerms } from "../review/forge/issues.ts";
 import {
   abortableGenerate,
@@ -107,6 +108,25 @@ async function walkthroughIssues(forge: Forge, changeSet: ChangeSet, config: Con
     issues.candidates = found?.filter((issue) => !linked.has(issue.ref));
   }
   return issues;
+}
+
+// Static analyzer results, best effort like the issues above: a forge that
+// will not show them (most often a GitHub App without the Checks permission)
+// costs a warning, and the review goes on with the model's findings alone.
+async function toolAnnotations(forge: Forge, changeSet: ChangeSet, warnings: string[]): Promise<ToolAnnotation[] | undefined> {
+  try {
+    const results = await forge.getToolAnnotations(changeSet.forgeRef);
+    warnings.push(...results.warnings);
+    return results.annotations;
+  } catch (err) {
+    const denied = err instanceof ForgeError && (err.status === 403 || err.status === 404);
+    warnings.push(
+      denied && changeSet.forgeRef.provider === "github"
+        ? "Static analysis results could not be read; the GitHub App needs the Checks (read) permission"
+        : `Static analysis results could not be read: ${message(err)}`,
+    );
+    return undefined;
+  }
 }
 
 // Loads everything a review needs, runs it, publishes it and stores the
@@ -295,6 +315,8 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     }));
   }
 
+  const tools = config.review.toolFindings ? await toolAnnotations(forge, changeSet, warnings) : undefined;
+
   const increment = await incrementFor({
     job,
     project: repo.fullPath,
@@ -320,6 +342,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
         ignoredFingerprints,
         rejectedFindings,
         increment,
+        toolAnnotations: tools,
       },
       { generate: watch ? abortableGenerate(generate, watch.signal) : generate, context },
     );

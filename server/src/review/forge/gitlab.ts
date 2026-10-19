@@ -5,6 +5,14 @@ import { ForgeError, ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
 import { cacheKey, cached, type ForgeCache } from "./cache.ts";
 import { MAX_CANDIDATE_ISSUES, MAX_LINKED_ISSUES } from "./issues.ts";
 import {
+  fromCodeQuality,
+  fromSastReport,
+  MAX_TOOL_ANNOTATIONS,
+  type CodeQualityIssue,
+  type SastReport,
+  type ToolResults,
+} from "./toolResults.ts";
+import {
   hostOrigin,
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
@@ -73,6 +81,29 @@ interface GlComparison {
   // Set when GitLab gave up computing the diff; the list is then incomplete.
   compare_timeout?: boolean;
 }
+
+interface GlPipeline {
+  id: number;
+  sha: string;
+}
+
+interface GlJob {
+  id: number;
+  name: string;
+  status: string;
+  artifacts?: { file_type: string }[];
+}
+
+// The reports Sentryward reads, by artifact type, and where GitLab's own CI
+// templates write them. The jobs API serves files from a job's artifacts
+// archive only, so a report declared under artifacts:reports alone (and not
+// also under artifacts:paths) cannot be downloaded.
+const REPORTS = {
+  codequality: "gl-code-quality-report.json",
+  sast: "gl-sast-report.json",
+} as const;
+
+const FINISHED_JOB = new Set(["success", "failed"]);
 
 function changeTypeOf(diff: GlDiff): ChangeType {
   if (diff.new_file) return "added";
@@ -337,6 +368,53 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       if (comparison.compare_timeout) return null;
       return [...new Set((comparison.diffs ?? []).flatMap((diff) => [diff.new_path, diff.old_path]))];
     });
+  }
+
+  // Reads the newest pipeline for the change's head commit. No pipeline, or
+  // no report jobs in it, is an empty result.
+  async getToolAnnotations(ref: ForgeRef): Promise<ToolResults> {
+    const pipelines = await this.http.json<GlPipeline[]>(`${this.mergeRequest(ref)}/pipelines?per_page=20`);
+    const pipeline = pipelines.find((candidate) => candidate.sha === ref.headSha);
+    if (!pipeline) return { annotations: [], warnings: [] };
+
+    const project = this.project(ref.project);
+    const jobs = await this.http.paginate<GlJob>(`${project}/pipelines/${pipeline.id}/jobs?per_page=100`, nextPage, 5);
+    const annotations: ToolResults["annotations"] = [];
+    const warnings: string[] = [];
+    const running: string[] = [];
+    for (const job of jobs) {
+      const types = new Set((job.artifacts ?? []).map((artifact) => artifact.file_type));
+      const reports = (Object.keys(REPORTS) as (keyof typeof REPORTS)[]).filter((type) => types.has(type));
+      if (reports.length === 0) {
+        if (!FINISHED_JOB.has(job.status) && /code.?quality|sast/i.test(job.name)) running.push(job.name);
+        continue;
+      }
+      for (const type of reports) {
+        const path = REPORTS[type];
+        let report: unknown;
+        try {
+          report = await this.http.json<unknown>(`${project}/jobs/${job.id}/artifacts/${path}`);
+        } catch (err) {
+          if (!isNotFound(err)) throw err;
+          warnings.push(
+            `The ${type} report of job "${job.name}" could not be downloaded; list ${path} under artifacts:paths as well as artifacts:reports`,
+          );
+          continue;
+        }
+        if (type === "codequality") {
+          for (const issue of Array.isArray(report) ? (report as CodeQualityIssue[]) : []) {
+            const mapped = fromCodeQuality(issue);
+            if (mapped) annotations.push(mapped);
+          }
+        } else {
+          annotations.push(...fromSastReport((report ?? {}) as SastReport));
+        }
+      }
+    }
+    if (running.length > 0) {
+      warnings.push(`Jobs still running when the review started were left out: ${running.join(", ")}`);
+    }
+    return { annotations: annotations.slice(0, MAX_TOOL_ANNOTATIONS), warnings };
   }
 
   private mergeRequest(ref: ForgeRef): string {

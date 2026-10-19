@@ -10,6 +10,17 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- Static analysis results already on the forge are reported as findings,
+  marked with the analyzer's name: check run annotations on GitHub (including
+  CodeQL), and Code Quality and SAST reports from the head pipeline on GitLab.
+  Only results on lines the change added are kept. They pass the same
+  category, severity floor, dismissal and finding-limit rules as model
+  findings, and where the model reported the same problem its finding is kept.
+  `review.tool_findings` (on by default) turns this off, and
+  `review.tool_findings_block` (off by default) lets them fail the verdict. The
+  GitHub App needs the Checks (read) permission; without it, or when a report
+  cannot be read, the review continues with a warning.
+
 - Reviews triggered by a push are incremental: only files the new commits
   touched since the last completed review are reviewed again (each with its
   whole PR/MR diff), and that review's findings on the other files are carried

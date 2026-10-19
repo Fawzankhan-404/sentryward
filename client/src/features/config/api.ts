@@ -38,6 +38,8 @@ export interface ConfigOverride {
     disableCache?: boolean
     fileContext?: boolean
     verify?: VerifyMode
+    toolFindings?: boolean
+    toolFindingsBlock?: boolean
   }
   output?: {
     walkthrough?: boolean
@@ -110,6 +112,8 @@ export interface EffectiveConfig {
     disableCache: boolean
     fileContext: boolean
     verify: VerifyMode
+    toolFindings: boolean
+    toolFindingsBlock: boolean
   }
   output: {
     walkthrough: boolean

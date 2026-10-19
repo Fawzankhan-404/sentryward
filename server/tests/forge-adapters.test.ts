@@ -223,6 +223,64 @@ describe("GitHubAdapter", () => {
     await expect(gh.deleteHook(repo, "77")).resolves.toBeUndefined();
   });
 
+  describe("getToolAnnotations", () => {
+    const ref = {
+      provider: "github" as const,
+      host: "github.com",
+      project: "acme/web",
+      number: 42,
+      baseSha: "base1",
+      startSha: "base1",
+      headSha: "head1",
+      webUrl: "https://github.com/acme/web/pull/42",
+    };
+
+    it("reads annotations of finished check runs and names running ones", async () => {
+      const { adapter: gh, calls } = adapter([
+        {
+          url: /\/repos\/acme\/web\/commits\/head1\/check-runs\?per_page=100$/,
+          body: {
+            check_runs: [
+              { id: 1, name: "lint", status: "completed", output: { annotations_count: 2 } },
+              { id: 2, name: "test", status: "completed", output: { annotations_count: 0 } },
+              { id: 3, name: "CodeQL", status: "in_progress", output: { annotations_count: 0 } },
+            ],
+          },
+        },
+        {
+          url: /\/check-runs\/1\/annotations\?per_page=100$/,
+          body: [
+            { path: "src/a.ts", start_line: 3, end_line: 3, annotation_level: "failure", title: "no-undef", message: "'x' is not defined." },
+            { path: "src/b.ts", start_line: 0, end_line: 0, annotation_level: "notice", title: null, message: "file-level" },
+          ],
+        },
+      ]);
+      const results = await gh.getToolAnnotations(ref);
+      expect(results.annotations).toEqual([
+        {
+          tool: "lint",
+          file: "src/a.ts",
+          startLine: 3,
+          endLine: 3,
+          severity: "major",
+          category: "bug",
+          title: "no-undef",
+          message: "'x' is not defined.",
+        },
+      ]);
+      expect(results.warnings).toEqual(["Checks still running when the review started were left out: CodeQL"]);
+      // No annotations are requested for runs that have none.
+      expect(calls.map((call) => call.url).filter((url) => url.includes("/annotations"))).toHaveLength(1);
+    });
+
+    it("throws a forbidden answer for the caller to report", async () => {
+      const { adapter: gh } = adapter([
+        { url: /\/check-runs\?per_page=100$/, status: 403, body: { message: "Resource not accessible by integration" } },
+      ]);
+      await expect(gh.getToolAnnotations(ref)).rejects.toMatchObject({ constructor: ForgeError, status: 403 });
+    });
+  });
+
   describe("compareCommits", () => {
     const COMPARE = /\/repos\/acme\/web\/compare\/h1\.\.\.h2$/;
 
@@ -528,6 +586,75 @@ describe("GitLabAdapter", () => {
     ]);
     expect(await gl.getFileAtRef("team/app", "config/.sentryward.yaml", "b")).toBeNull();
     expect(calls).toHaveLength(1);
+  });
+
+  describe("getToolAnnotations", () => {
+    const ref = {
+      provider: "gitlab" as const,
+      host: "gitlab.acme.com",
+      project: "team/app",
+      number: 7,
+      baseSha: "b",
+      startSha: "b",
+      headSha: "h7",
+      webUrl: "https://gitlab.acme.com/team/app/-/merge_requests/7",
+    };
+
+    it("reads Code Quality and SAST reports from the head pipeline", async () => {
+      const { adapter: gl } = adapter([
+        {
+          url: /\/merge_requests\/7\/pipelines\?per_page=20$/,
+          body: [
+            { id: 99, sha: "h7" },
+            { id: 98, sha: "old" },
+          ],
+        },
+        {
+          url: /\/pipelines\/99\/jobs\?per_page=100$/,
+          body: [
+            { id: 1, name: "code_quality", status: "success", artifacts: [{ file_type: "archive" }, { file_type: "codequality" }] },
+            { id: 2, name: "semgrep-sast", status: "success", artifacts: [{ file_type: "sast" }] },
+            { id: 3, name: "test", status: "success", artifacts: [] },
+          ],
+        },
+        {
+          url: /\/jobs\/1\/artifacts\/gl-code-quality-report\.json$/,
+          body: [
+            {
+              description: "Unused variable 'c'.",
+              check_name: "no-unused-vars",
+              severity: "minor",
+              engine_name: "eslint",
+              location: { path: "src/a.ts", lines: { begin: 4 } },
+            },
+          ],
+        },
+        { url: /\/jobs\/2\/artifacts\/gl-sast-report\.json$/, status: 404, body: { message: "404 Not Found" } },
+      ]);
+      const results = await gl.getToolAnnotations(ref);
+      expect(results.annotations).toEqual([
+        {
+          tool: "eslint",
+          file: "src/a.ts",
+          startLine: 4,
+          endLine: 4,
+          severity: "minor",
+          category: "maintainability",
+          ruleId: "no-unused-vars",
+          title: "Unused variable 'c'.",
+          message: "Unused variable 'c'.",
+        },
+      ]);
+      expect(results.warnings).toEqual([
+        'The sast report of job "semgrep-sast" could not be downloaded; list gl-sast-report.json under artifacts:paths as well as artifacts:reports',
+      ]);
+    });
+
+    it("finds nothing without a pipeline for the head commit", async () => {
+      const { adapter: gl, calls } = adapter([{ url: /\/merge_requests\/7\/pipelines/, body: [{ id: 98, sha: "old" }] }]);
+      expect(await gl.getToolAnnotations(ref)).toEqual({ annotations: [], warnings: [] });
+      expect(calls).toHaveLength(1);
+    });
   });
 
   describe("compareCommits", () => {
