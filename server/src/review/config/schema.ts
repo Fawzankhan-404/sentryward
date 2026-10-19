@@ -74,6 +74,11 @@ const reviewShape = {
   // ones are dropped, uncertain ones demoted like an unproven blocker.
   // "blocking" checks only those at or above blockOn, "all" every finding.
   verify: z.enum(VERIFY_MODES),
+  // Report what static analyzers already found on the change (GitHub check
+  // run annotations, GitLab Code Quality and SAST reports) as tool findings.
+  toolFindings: z.boolean(),
+  // Let those tool findings reach blockOn and fail the verdict.
+  toolFindingsBlock: z.boolean(),
 };
 
 export const SUMMARY_LOCATIONS = ["dynamic", "description", "comment"] as const;
@@ -207,6 +212,8 @@ export const DEFAULT_CONFIG: Config = {
     disableCache: false,
     fileContext: true,
     verify: "blocking",
+    toolFindings: true,
+    toolFindingsBlock: false,
   },
   output: {
     walkthrough: true,

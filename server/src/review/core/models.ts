@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { categorySchema, effortSchema, evidenceSchema, kindSchema, severitySchema } from "./severity.ts";
+import {
+  categorySchema,
+  effortSchema,
+  evidenceSchema,
+  kindSchema,
+  severitySchema,
+  type Category,
+  type Severity,
+} from "./severity.ts";
 
 // The intermediate representation every forge produces and every later stage
 // reads. Line numbers are new-file coordinates everywhere; only publishers
@@ -109,13 +117,30 @@ export const findingSchema = z.object({
   evidence: evidenceSchema,
   evidenceNote: z.string(),
   evidenceFiles: z.array(z.string()),
-  source: z.enum(["llm", "static", "rule"]),
+  // "tool" findings come from analyzers that already ran on the forge (check
+  // run annotations, GitLab report artifacts), named by `tool`.
+  source: z.enum(["llm", "tool", "rule"]),
+  tool: z.string().optional(),
   ruleId: z.string().optional(),
   fingerprint: z.string(),
   // Decided once by core/buckets.ts so no surface can disagree about it.
   bucket: bucketSchema,
 });
 export type Finding = z.infer<typeof findingSchema>;
+
+// One result of a static analyzer as the forge reported it, before it is
+// checked against the diff and the config like any model finding.
+export interface ToolAnnotation {
+  tool: string;
+  file: string;
+  startLine: number;
+  endLine: number;
+  severity: Severity;
+  category: Category;
+  ruleId?: string;
+  title: string;
+  message: string;
+}
 
 export const omissionReasonSchema = z.enum([
   "ignored",

@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/lib/prisma.ts";
-import type { IssueContext } from "../src/review/core/models.ts";
+import type { IssueContext, ToolAnnotation } from "../src/review/core/models.ts";
 import { ForgeCache } from "../src/review/forge/cache.ts";
+import { ForgeError } from "../src/review/forge/http.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
@@ -107,9 +108,12 @@ function deps(
     files?: FileDiffInput[];
     // What compareCommits answers; recorded as "compare:<from>..<to>".
     compare?: string[] | null | Error;
+    // What getToolAnnotations answers; each call is recorded in toolReads.
+    tools?: { annotations: ToolAnnotation[]; warnings: string[] } | Error;
   } = {},
 ) {
   const reads: string[] = [];
+  const toolReads: string[] = [];
   const published: Published = { inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] };
   const forge = {
     getChange: async (_p: string, _n: number, cache?: ForgeCache) => {
@@ -126,6 +130,11 @@ function deps(
       reads.push(`compare:${from}..${to}`);
       if (options.compare instanceof Error) throw options.compare;
       return options.compare === undefined ? [] : options.compare;
+    },
+    getToolAnnotations: async (ref: { headSha: string }) => {
+      toolReads.push(ref.headSha);
+      if (options.tools instanceof Error) throw options.tools;
+      return options.tools ?? { annotations: [], warnings: [] };
     },
     getChangeHead: async () => {
       const states = options.states ?? ["open"];
@@ -186,7 +195,7 @@ function deps(
     credentialsFor: async () => ({ keys, baseUrls: {}, connections }),
     cache: options.cache,
   };
-  return { runDeps, reads, model, published };
+  return { runDeps, reads, toolReads, model, published };
 }
 
 async function claimedJob() {
@@ -219,6 +228,70 @@ describe("runJob", () => {
     const findings = await prisma.finding.findMany({ where: { repositoryId, number: 42 } });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ state: "open", author: "alice", lastJobId: job.id });
+  });
+
+  it("reports static analysis on changed lines as tool findings that do not block", async () => {
+    const job = await claimedJob();
+    const annotation: ToolAnnotation = {
+      tool: "lint",
+      file: "src/app.ts",
+      startLine: 12,
+      endLine: 12,
+      severity: "critical",
+      category: "bug",
+      ruleId: "no-undef",
+      title: "'c' is not defined",
+      message: "'c' is not defined.",
+    };
+    const { runDeps, toolReads, published } = deps(
+      {},
+      { code_review: { findings: [] }, walkthrough: WALKTHROUGH },
+      { anthropic: "k" },
+      { tools: { annotations: [annotation], warnings: ["Checks still running when the review started were left out: test"] } },
+    );
+
+    await runJob(job, runDeps);
+
+    expect(toolReads).toEqual(["newhead"]);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "completed", verdict: "pass" });
+    const result = stored.result as { findings: { source: string; tool?: string }[]; warnings: string[] };
+    expect(result.findings).toEqual([expect.objectContaining({ source: "tool", tool: "lint", ruleId: "no-undef" })]);
+    expect(result.warnings).toContain("Checks still running when the review started were left out: test");
+    expect(published.inline).toHaveLength(1);
+  });
+
+  it("warns, and still reviews, when static analysis results cannot be read", async () => {
+    const job = await claimedJob();
+    const { runDeps } = deps(
+      {},
+      { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH },
+      { anthropic: "k" },
+      { tools: new ForgeError(403, "GET check-runs failed (403): Resource not accessible by integration") },
+    );
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "completed", verdict: "blocked" });
+    const result = stored.result as { findings: unknown[]; warnings: string[] };
+    expect(result.findings).toHaveLength(1);
+    expect(result.warnings).toContain(
+      "Static analysis results could not be read; the GitHub App needs the Checks (read) permission",
+    );
+  });
+
+  it("does not read static analysis results when tool findings are off", async () => {
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { review: { blockOn: "major", toolFindings: false } } },
+    });
+    const job = await claimedJob();
+    const { runDeps, toolReads } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(toolReads).toEqual([]);
   });
 
   it("never reposts a finding this team dismissed on the same change", async () => {

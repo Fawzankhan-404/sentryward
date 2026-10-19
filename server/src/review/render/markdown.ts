@@ -66,6 +66,12 @@ function codeCell(text: string): string {
   return sanitize(text).replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")).replace(/\|/g, "\\|").replace(/\n+/g, " ");
 }
 
+// Names the analyzer behind a tool finding, after its severity and category.
+// The name comes from the forge (a check run or report), so it is escaped too.
+export function toolSuffix(finding: Finding): string {
+  return finding.source === "tool" && finding.tool ? ` · via ${inline(finding.tool).replace(/[*_`]/g, "\\$&")}` : "";
+}
+
 function location(finding: Finding): string {
   const lines = finding.startLine === finding.endLine ? `${finding.startLine}` : `${finding.startLine}-${finding.endLine}`;
   return `\`${finding.file}:${lines}\``;
@@ -211,7 +217,7 @@ function findingDetail(finding: Finding): string[] {
   const lines = [
     `#### ${location(finding)}: ${inline(finding.title)}`,
     "",
-    `${SEVERITY_ICON[finding.severity]} *${finding.severity} · ${finding.category} · ${finding.kind.replace(/_/g, " ")}*`,
+    `${SEVERITY_ICON[finding.severity]} *${finding.severity} · ${finding.category} · ${finding.kind.replace(/_/g, " ")}${toolSuffix(finding)}*`,
     "",
     sanitize(finding.body),
   ];

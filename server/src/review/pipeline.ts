@@ -10,6 +10,7 @@ import {
   type RejectedFinding,
   type ReviewResult,
   type ReviewStatus,
+  type ToolAnnotation,
   type Walkthrough,
 } from "./core/models.ts";
 import { mapLimit } from "./core/mapLimit.ts";
@@ -22,7 +23,7 @@ import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
 import { generateWalkthrough, type WalkthroughIssues } from "./llm/walkthrough.ts";
-import { compareFindings, validateFindings, type DropReason } from "./validate/validator.ts";
+import { compareFindings, validateFindings, validateToolFindings, type DropReason } from "./validate/validator.ts";
 import { verifyFindings } from "./validate/verify.ts";
 
 export interface ReviewDeps {
@@ -51,6 +52,9 @@ export interface RunReviewInput {
   // Review only these files of the change, and keep the earlier review's
   // findings on the rest (worker/incremental.ts). Absent means a full review.
   increment?: Increment;
+  // Static analyzer results the forge already holds for the head revision,
+  // fetched by the caller when review.toolFindings is on.
+  toolAnnotations?: ToolAnnotation[];
 }
 
 export interface Increment {
@@ -99,6 +103,18 @@ function lineCounts(changeSet: ChangeSet): ReviewResult["files"] {
       deletions,
     };
   });
+}
+
+// A tool finding the model also reported: same file and category, with
+// overlapping lines, or the very same fingerprint.
+function sameProblem(model: Finding, tool: Finding): boolean {
+  if (model.fingerprint === tool.fingerprint) return true;
+  return (
+    model.file === tool.file &&
+    model.category === tool.category &&
+    model.startLine <= tool.endLine &&
+    tool.startLine <= model.endLine
+  );
 }
 
 function errorMessage(err: unknown): string {
@@ -237,7 +253,21 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   // when first reported, and only a dismissal since then removes them. A file
   // ignored since then drops its findings too, as a full review would (the
   // worker reviews in full when ignore_paths changes, this keeps it true here).
-  const fresh = new Set(verified.findings.map((finding) => finding.fingerprint));
+  // Tool findings skip verification (the analyzer is the evidence) and need
+  // no successful pass, only a file in scope. Where the model reported the
+  // same problem, its finding is kept: it explains more and may suggest a fix.
+  const tools = config.review.toolFindings
+    ? validateToolFindings(input.toolAnnotations ?? [], changeSet, scoped, config, input.ignoredFingerprints)
+    : undefined;
+  const toolFindings = (tools?.findings ?? []).filter(
+    (finding) => !verified.findings.some((model) => sameProblem(model, finding)),
+  );
+  const toolDuplicates = (tools?.findings.length ?? 0) - toolFindings.length;
+  const reviewed = [...verified.findings, ...toolFindings].sort(compareFindings);
+  // The cap covers model and tool findings together; the model's own were
+  // already capped by the validator.
+  const overLimit = Math.max(0, reviewed.length - config.review.maxFindings);
+  const fresh = new Set(reviewed.map((finding) => finding.fingerprint));
   const reviewablePaths = new Set(reviewable.map((file) => file.path));
   const carried = (increment?.carried ?? []).filter(
     (finding) =>
@@ -246,10 +276,17 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
       !fresh.has(finding.fingerprint) &&
       !input.ignoredFingerprints?.has(finding.fingerprint),
   );
-  const findings = carried.length ? [...verified.findings, ...carried].sort(compareFindings) : verified.findings;
+  const capped = overLimit > 0 ? reviewed.slice(0, config.review.maxFindings) : reviewed;
+  const findings = carried.length ? [...capped, ...carried].sort(compareFindings) : capped;
   const dropped: Partial<Record<DropReason, number>> = { ...validation.dropped };
-  for (const [reason, count] of Object.entries(verified.dropped) as [DropReason, number][]) {
-    dropped[reason] = (dropped[reason] ?? 0) + count;
+  const extra: [DropReason, number][] = [
+    ...(Object.entries(verified.dropped) as [DropReason, number][]),
+    ...(Object.entries(tools?.dropped ?? {}) as [DropReason, number][]),
+    ["duplicate", toolDuplicates],
+    ["over_limit", overLimit],
+  ];
+  for (const [reason, count] of extra) {
+    if (count > 0) dropped[reason] = (dropped[reason] ?? 0) + count;
   }
 
   let status: ReviewStatus = "completed";
@@ -286,9 +323,9 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
     validation: { dropped, demoted: validation.demoted + verified.demoted },
     usage,
     verdict: {
-      verdict: verdictFor(status, findings, blockOn),
+      verdict: verdictFor(status, findings, blockOn, config.review.toolFindingsBlock),
       blockOn,
-      blocking: blockingFindings(findings, blockOn).map((finding) => finding.fingerprint),
+      blocking: blockingFindings(findings, blockOn, config.review.toolFindingsBlock).map((finding) => finding.fingerprint),
     },
     startedAt,
     finishedAt: now().toISOString(),
