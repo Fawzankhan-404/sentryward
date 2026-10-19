@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { Link } from "react-router"
-import { ChevronRight, Copy, ExternalLink, MoreHorizontal, RotateCw } from "lucide-react"
+import { ChevronRight, Copy, ExternalLink, MoreHorizontal, OctagonX, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { NoMatchesRow } from "@/components/TableFilters"
 import { Button } from "@/components/ui/button"
@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PROVIDERS } from "@/features/forge/providers"
 import { formatDuration, timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import { fetchReviewMarkdown, useRerunReview, useReviews } from "./api"
+import { fetchReviewMarkdown, useCancelReview, useRerunReview, useReviews } from "./api"
 import { SeverityBadge, StatusBadge, TriggerIcon, VerdictBadge } from "./badges"
+import { CancelReviewDialog } from "./CancelReviewDialog"
 import { changeLabel, changeTitle } from "./links"
 import { RerunReviewDialog } from "./RerunReviewDialog"
 import { isActive, SEVERITIES, type ReviewListItem } from "./types"
@@ -58,7 +59,9 @@ function Duration({ review, now }: { review: ReviewListItem; now: number }) {
 
 function ReviewActions({ review }: { review: ReviewListItem }) {
   const rerun = useRerunReview()
+  const cancel = useCancelReview()
   const [confirming, setConfirming] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const forge = PROVIDERS[review.repository.provider].label
   const webUrl = review.summary?.webUrl
 
@@ -69,6 +72,16 @@ function ReviewActions({ review }: { review: ReviewListItem }) {
       setConfirming(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start a new review")
+    }
+  }
+
+  async function stop() {
+    try {
+      await cancel.mutateAsync(review.id)
+      toast.success("Review cancelled")
+      setCancelling(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel the review")
     }
   }
 
@@ -95,6 +108,12 @@ function ReviewActions({ review }: { review: ReviewListItem }) {
             <RotateCw />
             Re-run
           </DropdownMenuItem>
+          {isActive(review.status) && (
+            <DropdownMenuItem onSelect={() => setCancelling(true)} disabled={cancel.isPending} variant="destructive">
+              <OctagonX />
+              Cancel review
+            </DropdownMenuItem>
+          )}
           {/* A summary is only stored alongside a result, which the markdown is rendered from. */}
           <DropdownMenuItem onSelect={copyMarkdown} disabled={!review.summary}>
             <Copy />
@@ -117,6 +136,13 @@ function ReviewActions({ review }: { review: ReviewListItem }) {
         onOpenChange={setConfirming}
         onConfirm={runAgain}
         pending={rerun.isPending}
+      />
+      <CancelReviewDialog
+        review={review}
+        open={cancelling}
+        onOpenChange={setCancelling}
+        onConfirm={stop}
+        pending={cancel.isPending}
       />
     </>
   )

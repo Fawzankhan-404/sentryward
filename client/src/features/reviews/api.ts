@@ -94,6 +94,14 @@ export function useRerunReview() {
   })
 }
 
+export function useCancelReview() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api<{ review: ReviewListItem }>(`/reviews/${id}/cancel`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reviews"] }),
+  })
+}
+
 export async function fetchReviewMarkdown(id: string): Promise<string> {
   const res = await fetch(`/api/reviews/${id}/markdown`, { credentials: "include", headers: workspaceHeaders() })
   if (!res.ok) throw new Error("Could not load the markdown")

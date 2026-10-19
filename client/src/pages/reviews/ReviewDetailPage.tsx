@@ -1,5 +1,6 @@
+import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
-import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, OctagonX, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/PageHeader"
 import { PageShell } from "@/components/PageShell"
@@ -8,8 +9,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { allFindingsPrompt } from "@/features/reviews/agentPrompt"
-import { fetchReviewMarkdown, useRerunReview, useReview } from "@/features/reviews/api"
+import { fetchReviewMarkdown, useCancelReview, useRerunReview, useReview } from "@/features/reviews/api"
 import { StatusBadge, VerdictBadge } from "@/features/reviews/badges"
+import { CancelReviewDialog } from "@/features/reviews/CancelReviewDialog"
 import { FindingsSection } from "@/features/reviews/detail/FindingsSection"
 import { ReviewSidebar } from "@/features/reviews/detail/ReviewSidebar"
 import { WalkthroughCard } from "@/features/reviews/detail/WalkthroughCard"
@@ -59,6 +61,8 @@ export function ReviewDetailPage() {
   const navigate = useNavigate()
   const { data, isPending, isError } = useReview(id)
   const rerun = useRerunReview()
+  const cancel = useCancelReview()
+  const [cancelling, setCancelling] = useState(false)
 
   if (isPending) {
     return (
@@ -94,6 +98,15 @@ export function ReviewDetailPage() {
       navigate(`/reviews/${next.id}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start a new review")
+    }
+  }
+
+  async function stop() {
+    try {
+      await cancel.mutateAsync(review.id)
+      setCancelling(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not cancel the review")
     }
   }
 
@@ -138,6 +151,12 @@ export function ReviewDetailPage() {
               {rerun.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
               Re-run
             </Button>
+            {isActive(review.status) && (
+              <Button variant="destructive" onClick={() => setCancelling(true)} disabled={cancel.isPending}>
+                <OctagonX />
+                Cancel
+              </Button>
+            )}
           </>
         }
       >
@@ -168,7 +187,7 @@ export function ReviewDetailPage() {
                   : review.status === "skipped"
                     ? "Skipped"
                     : review.status === "cancelled"
-                      ? "Cancelled because the change was closed"
+                      ? "Cancelled"
                       : "The review did not run"}
               </AlertTitle>
               {review.error && <AlertDescription>{review.error}</AlertDescription>}
@@ -177,6 +196,13 @@ export function ReviewDetailPage() {
         </div>
         <ReviewSidebar review={review} result={result} />
       </div>
+      <CancelReviewDialog
+        review={review}
+        open={cancelling}
+        onOpenChange={setCancelling}
+        onConfirm={stop}
+        pending={cancel.isPending}
+      />
     </PageShell>
   )
 }
