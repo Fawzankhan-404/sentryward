@@ -222,6 +222,49 @@ describe("GitHubAdapter", () => {
     });
     await expect(gh.deleteHook(repo, "77")).resolves.toBeUndefined();
   });
+
+  describe("compareCommits", () => {
+    const COMPARE = /\/repos\/acme\/web\/compare\/h1\.\.\.h2$/;
+
+    it("lists the files changed since an ancestor, with a rename's old path", async () => {
+      const { adapter: gh } = adapter([
+        {
+          url: COMPARE,
+          body: {
+            status: "ahead",
+            files: [{ filename: "src/a.ts" }, { filename: "src/new.ts", previous_filename: "src/old.ts" }],
+          },
+        },
+      ]);
+      expect(await gh.compareCommits("acme/web", "h1", "h2")).toEqual(["src/a.ts", "src/new.ts", "src/old.ts"]);
+    });
+
+    it("returns an empty list for identical commits", async () => {
+      const { adapter: gh } = adapter([{ url: COMPARE, body: { status: "identical", files: [] } }]);
+      expect(await gh.compareCommits("acme/web", "h1", "h2")).toEqual([]);
+    });
+
+    it.each(["diverged", "behind"])("returns null when the history is %s", async (status) => {
+      const { adapter: gh } = adapter([{ url: COMPARE, body: { status, files: [{ filename: "src/a.ts" }] } }]);
+      expect(await gh.compareCommits("acme/web", "h1", "h2")).toBeNull();
+    });
+
+    it("returns null when a commit is gone", async () => {
+      const { adapter: gh } = adapter([{ url: COMPARE, status: 404, body: { message: "Not Found" } }]);
+      expect(await gh.compareCommits("acme/web", "h1", "h2")).toBeNull();
+    });
+
+    it("returns null when the file list may be cut short", async () => {
+      const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/f${i}.ts` }));
+      const { adapter: gh } = adapter([{ url: COMPARE, body: { status: "ahead", files } }]);
+      expect(await gh.compareCommits("acme/web", "h1", "h2")).toBeNull();
+    });
+
+    it("surfaces other failures", async () => {
+      const { adapter: gh } = adapter([{ url: COMPARE, status: 502, body: { message: "Bad Gateway" } }]);
+      await expect(gh.compareCommits("acme/web", "h1", "h2")).rejects.toBeInstanceOf(ForgeError);
+    });
+  });
 });
 
 describe("GitHubApp", () => {
@@ -485,5 +528,53 @@ describe("GitLabAdapter", () => {
     ]);
     expect(await gl.getFileAtRef("team/app", "config/.sentryward.yaml", "b")).toBeNull();
     expect(calls).toHaveLength(1);
+  });
+
+  describe("compareCommits", () => {
+    const MERGE_BASE = /\/repository\/merge_base\?refs\[\]=h1&refs\[\]=h2$/;
+    const COMPARE = /\/repository\/compare\?from=h1&to=h2$/;
+
+    it("lists the files changed since an ancestor, old and new paths", async () => {
+      const { adapter: gl } = adapter([
+        { url: MERGE_BASE, body: { id: "h1" } },
+        {
+          url: COMPARE,
+          body: {
+            diffs: [
+              { old_path: "src/a.ts", new_path: "src/a.ts" },
+              { old_path: "src/old.ts", new_path: "src/new.ts" },
+            ],
+          },
+        },
+      ]);
+      expect(await gl.compareCommits("team/app", "h1", "h2")).toEqual(["src/a.ts", "src/new.ts", "src/old.ts"]);
+    });
+
+    it("returns null when the old head is not an ancestor, without comparing", async () => {
+      const { adapter: gl, calls } = adapter([{ url: MERGE_BASE, body: { id: "other" } }]);
+      expect(await gl.compareCommits("team/app", "h1", "h2")).toBeNull();
+      expect(calls).toHaveLength(1);
+    });
+
+    it.each([400, 404])("returns null when the merge base answers %i", async (status) => {
+      const { adapter: gl } = adapter([{ url: MERGE_BASE, status, body: { message: "Could not find ref: h1" } }]);
+      expect(await gl.compareCommits("team/app", "h1", "h2")).toBeNull();
+    });
+
+    it("returns null when GitLab timed out computing the diff", async () => {
+      const { adapter: gl } = adapter([
+        { url: MERGE_BASE, body: { id: "h1" } },
+        { url: COMPARE, body: { diffs: [{ old_path: "a", new_path: "a" }], compare_timeout: true } },
+      ]);
+      expect(await gl.compareCommits("team/app", "h1", "h2")).toBeNull();
+    });
+
+    it("surfaces a failed comparison", async () => {
+      const { adapter: gl } = adapter([
+        { url: MERGE_BASE, body: { id: "h1" } },
+        { url: COMPARE, status: 502, body: {} },
+      ]);
+      await expect(gl.compareCommits("team/app", "h1", "h2")).rejects.toBeInstanceOf(ForgeError);
+    });
   });
 });

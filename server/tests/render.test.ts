@@ -55,6 +55,36 @@ describe("toMarkdown", () => {
     expect(markdown).toContain("- `package-lock.json`: ignored by configuration");
   });
 
+  describe("an incremental review", () => {
+    const incremental = async (files: string[], reviewedFiles: string[], carried = 0) => {
+      const result = await sampleResult();
+      return toMarkdown({
+        ...result,
+        change: { ...result.change, headSha: "bbbbbbb2222" },
+        incremental: { fromSha: "aaaaaaa1111", toSha: "bbbbbbb2222", files, carried },
+        coverage: { ...result.coverage, reviewedFiles },
+      });
+    };
+
+    it("names the commit range and the files reviewed again", async () => {
+      const markdown = await incremental(["src/a.ts", "src/b.ts"], ["src/a.ts", "src/b.ts"], 1);
+      expect(markdown).toContain(
+        "> 🔁 Incremental review of `aaaaaaa..bbbbbbb`: 2 files changed since the last review were reviewed; 1 finding carried over from the earlier review.",
+      );
+      expect(markdown).toContain("<sub>Reviewed `aaaaaaa..bbbbbbb` with");
+    });
+
+    it("counts only the files a pass finished", async () => {
+      const markdown = await incremental(["src/a.ts", "src/b.ts"], ["src/a.ts"]);
+      expect(markdown).toContain(": 1 of 2 files changed since the last review was reviewed.");
+    });
+
+    it("says so when no file of the change was touched", async () => {
+      const markdown = await incremental([], [], 3);
+      expect(markdown).toContain(": no file of this change was touched since the last review; 3 findings carried over");
+    });
+  });
+
   const withVerdict = (result: ReviewResult, patch: Partial<ReviewResult>) => ({ ...result, ...patch });
 
   it("states pass and incomplete verdicts plainly", async () => {

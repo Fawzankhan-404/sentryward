@@ -10,6 +10,7 @@ import {
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
   MAX_CODE_SEARCH_RESULTS,
+  MAX_COMPARE_FILES,
   type ChangeHead,
   type ChangeSummary,
   type CommitStatus,
@@ -67,6 +68,11 @@ interface GhFile {
   status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
   patch?: string;
   changes: number;
+}
+
+interface GhComparison {
+  status: "ahead" | "behind" | "diverged" | "identical";
+  files?: Pick<GhFile, "filename" | "previous_filename">[];
 }
 
 // GitHub caps the files endpoint at 3000 files, 100 per page.
@@ -337,6 +343,26 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       `/search/code?q=${encodeURIComponent(query)}&per_page=${MAX_CODE_SEARCH_RESULTS}`,
     );
     return [...new Set(result.items.map((item) => item.path))];
+  }
+
+  // "ahead" (or "identical") is the only answer in which `from` is an
+  // ancestor of `to`; "diverged" and "behind" mean history was rewritten.
+  async compareCommits(project: string, from: string, to: string, cache?: ForgeCache): Promise<string[] | null> {
+    return cached(cache, cacheKey("github-compare", this.host, project, from, to), async () => {
+      let comparison: GhComparison;
+      try {
+        comparison = await this.http.json<GhComparison>(
+          `${repoApiPath(project)}/compare/${encodeURIComponent(from)}...${encodeURIComponent(to)}`,
+        );
+      } catch (err) {
+        if (isNotFound(err)) return null;
+        throw err;
+      }
+      if (comparison.status !== "ahead" && comparison.status !== "identical") return null;
+      const files = comparison.files ?? [];
+      if (files.length >= MAX_COMPARE_FILES) return null;
+      return [...new Set(files.flatMap((file) => (file.previous_filename ? [file.filename, file.previous_filename] : [file.filename])))];
+    });
   }
 
   private isSelf(comment: GhComment): boolean {

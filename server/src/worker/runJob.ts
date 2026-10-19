@@ -26,6 +26,7 @@ import { progressMarkdown } from "../review/render/progress.ts";
 import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
+import { incrementFor } from "./incremental.ts";
 import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
 import { findingTransitions, syncFindings, threadOperations, type ThreadOutcome } from "./syncFindings.ts";
 
@@ -294,6 +295,16 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     }));
   }
 
+  const increment = await incrementFor({
+    job,
+    project: repo.fullPath,
+    changeSet,
+    config,
+    forge,
+    cache: fileCache,
+    warnings,
+  });
+
   let result;
   try {
     result = await runReview(
@@ -308,6 +319,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
         issues,
         ignoredFingerprints,
         rejectedFindings,
+        increment,
       },
       { generate: watch ? abortableGenerate(generate, watch.signal) : generate, context },
     );

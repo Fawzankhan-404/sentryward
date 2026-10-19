@@ -61,6 +61,7 @@ export interface ConfigOverride {
   triggers?: {
     review?: ReviewTrigger
     reviewOnPush?: boolean
+    fullReviewOnPush?: boolean
     summary?: SummaryTrigger
     command?: boolean
     abortOnClose?: boolean
@@ -132,6 +133,7 @@ export interface EffectiveConfig {
   triggers: {
     review: ReviewTrigger
     reviewOnPush: boolean
+    fullReviewOnPush: boolean
     summary: SummaryTrigger
     command: boolean
     abortOnClose: boolean

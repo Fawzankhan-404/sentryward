@@ -319,6 +319,7 @@ Turn the first three off with `output.post_inline`, `output.post_summary` and `o
 - A PR/MR is reviewed when it opens, reopens, leaves draft or receives new commits. A commit that was already queued or reviewed is never reviewed again, so redelivered webhooks are harmless, and a newer push supersedes a review still waiting in the queue.
 - Comment `/sentryward review` on a PR/MR to ask for a review of its current head. Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) can.
 - `triggers.review` picks what is reviewed automatically when it opens, reopens or leaves draft: `manual` (nothing), `published` (the default, drafts skipped) or `all`. `triggers.review_on_push` decides whether new commits are reviewed again, and `triggers.command` turns `/sentryward review` off.
+- A review triggered by a push is incremental: only the files the new commits touched since the last completed review are reviewed again (each with its whole PR/MR diff), and that review's findings on the other files are carried over, so they stay open and still count toward the verdict. A force push or rebase, a partial or failed last review, a comparison the forge cannot answer, and manual or `/sentryward review` requests get a full review. `triggers.full_review_on_push` reviews the whole change on every push instead.
 - `triggers.summary` limits the walkthrough in automatic reviews: `published` (the default) or `manual`, which leaves it to requested reviews.
 - Automatic reviews are skipped when the title contains a phrase in `triggers.ignore_titles` (ignoring case), the author or whoever pushed is in `triggers.skip_authors`, the change carries a label in `triggers.skip_labels` (exact and case-sensitive), or the source or target branch name contains an entry of `triggers.skip_source_branches` / `triggers.skip_target_branches`. A manual review or `/sentryward review` is never skipped by these lists.
 - All of this is checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
@@ -408,6 +409,7 @@ output:
 triggers:
   review: published         # manual | published | all (drafts too)
   review_on_push: true      # review new commits pushed to an open PR/MR
+  full_review_on_push: false  # on push, review every file, not only those the new commits touched
   summary: published        # manual | published: walkthrough in automatic reviews
   command: true             # allow "/sentryward review" in a comment
   abort_on_close: true      # stop a review when its PR/MR is closed or merged

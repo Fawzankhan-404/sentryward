@@ -137,6 +137,10 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Review automatically on push",
     description: "Review the new commits on every push to the PR/MR.",
   },
+  fullReviewOnPush: {
+    label: "Full review on push",
+    description: "Review every file of the PR/MR on push, not only the files the new commits touched.",
+  },
   command: {
     label: "Allow review command",
     description: (
@@ -811,6 +815,7 @@ export function ConfigFields(props: {
   const walkthroughOn = shownFlag("walkthrough")
   const postSummaryOn = shownFlag("postSummary")
   const postInlineOn = shownFlag("postInline")
+  const reviewOnPushOn = shownFlag("reviewOnPush")
   const highLevelSummaryOn = walkthroughOn && shownFlag("highLevelSummary")
   const inheritedSummaryInstructions = inherited?.output.highLevelSummaryInstructions
 
@@ -1081,7 +1086,9 @@ export function ConfigFields(props: {
             {choiceField("review")}
             {choiceField("summary")}
           </div>
-          <ToggleList>{toggles(["reviewOnPush", "command", "abortOnClose"])}</ToggleList>
+          <ToggleList>{toggles(["reviewOnPush"])}</ToggleList>
+          <ToggleList>{toggles(["fullReviewOnPush"], !reviewOnPushOn)}</ToggleList>
+          <ToggleList>{toggles(["command", "abortOnClose"])}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section

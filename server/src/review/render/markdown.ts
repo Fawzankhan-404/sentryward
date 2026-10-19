@@ -262,12 +262,35 @@ function coverageSection(result: ReviewResult): string[] {
   return lines;
 }
 
+// Says up front that the findings below are partly an earlier review's, so a
+// reader does not take untouched files as freshly checked. Counts the files a
+// pass actually finished, not the ones planned, so a failed pass is not
+// reported as reviewed.
+function incrementalNote(result: ReviewResult): string[] {
+  const { incremental } = result;
+  if (!incremental) return [];
+  const range = `\`${incremental.fromSha.slice(0, 7)}..${incremental.toSha.slice(0, 7)}\``;
+  const carried = incremental.carried ? `; ${plural(incremental.carried, "finding")} carried over from the earlier review` : "";
+  const planned = incremental.files.length;
+  const reviewedFiles = new Set(result.coverage.reviewedFiles);
+  const reviewed = incremental.files.filter((path) => reviewedFiles.has(path)).length;
+  let scope: string;
+  if (planned === 0) scope = "no file of this change was touched since the last review";
+  else if (reviewed === planned) {
+    scope = `${plural(planned, "file")} changed since the last review ${planned === 1 ? "was" : "were"} reviewed`;
+  } else scope = `${reviewed} of ${plural(planned, "file")} changed since the last review ${reviewed === 1 ? "was" : "were"} reviewed`;
+  return ["", `> 🔁 Incremental review of ${range}: ${scope}${carried}.`];
+}
+
 function footer(result: ReviewResult): string {
   const models = [...new Set(result.usage.map((u) => u.model))].join(", ") || "no model call";
   const passes = plural(result.coverage.passes, "review pass");
   const refuted = result.validation.dropped.refuted ?? 0;
   const verification = refuted ? ` · ${plural(refuted, "finding")} refuted on verification` : "";
-  return `<sub>Reviewed \`${result.change.headSha.slice(0, 7)}\` with ${models} · ${passes} · ${plural(result.coverage.reviewedFiles.length, "file")} reviewed${verification}</sub>`;
+  const commits = result.incremental
+    ? `${result.incremental.fromSha.slice(0, 7)}..${result.change.headSha.slice(0, 7)}`
+    : result.change.headSha.slice(0, 7);
+  return `<sub>Reviewed \`${commits}\` with ${models} · ${passes} · ${plural(result.coverage.reviewedFiles.length, "file")} reviewed${verification}</sub>`;
 }
 
 // The one markdown document for a review. The forge summary comment and the
@@ -286,6 +309,7 @@ export function toMarkdown(
   const walkthrough = options.walkthrough === false ? null : walkthroughSection(result, options);
   const lines = [walkthrough?.heading ?? "## Summary", ...(walkthrough?.lines ?? [])];
   lines.push("", ...verdictSection(result), "", countsLine(result));
+  lines.push(...incrementalNote(result));
   lines.push(...bucketSections(result));
   if (options.agentPrompt !== false && result.findings.length) {
     lines.push("", ...agentPromptBlock("Prompt for all review comments with AI agents", allFindingsPrompt(result.findings)));

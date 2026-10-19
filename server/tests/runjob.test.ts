@@ -8,7 +8,8 @@ import { claimNext, enqueue } from "../src/worker/queue.ts";
 import { runJob, skipReason, walkthroughEnabled, type RunJobDeps } from "../src/worker/runJob.ts";
 import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
 import { fingerprint } from "../src/review/core/fingerprint.ts";
-import { makeChangeSet } from "./helpers/changeSet.ts";
+import type { FileDiffInput } from "../src/review/diff/parse.ts";
+import { APP_PATCH, makeChangeSet } from "./helpers/changeSet.ts";
 import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
 
 let repositoryId: string;
@@ -101,6 +102,11 @@ function deps(
     cache?: ForgeCache;
     // Every thread update fails, as a forge outage would.
     failThreads?: boolean;
+    // The head getChange reports, and the change's files.
+    head?: string;
+    files?: FileDiffInput[];
+    // What compareCommits answers; recorded as "compare:<from>..<to>".
+    compare?: string[] | null | Error;
   } = {},
 ) {
   const reads: string[] = [];
@@ -108,13 +114,18 @@ function deps(
   const forge = {
     getChange: async (_p: string, _n: number, cache?: ForgeCache) => {
       reads.push(cache ? "change:cached" : "change");
-      const change = makeChangeSet();
+      const change = makeChangeSet(options.files);
       return {
         ...change,
         title: options.title ?? change.title,
         author: "alice",
-        forgeRef: { ...change.forgeRef, headSha: "newhead" },
+        forgeRef: { ...change.forgeRef, headSha: options.head ?? "newhead" },
       };
+    },
+    compareCommits: async (_p: string, from: string, to: string) => {
+      reads.push(`compare:${from}..${to}`);
+      if (options.compare instanceof Error) throw options.compare;
+      return options.compare === undefined ? [] : options.compare;
     },
     getChangeHead: async () => {
       const states = options.states ?? ["open"];
@@ -720,5 +731,165 @@ describe("runJob with automatic triggers", () => {
     expect(stored.error).toMatch(/turned off/);
     expect(model.requests).toHaveLength(0);
     expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [], threads: [] });
+  });
+});
+
+describe("runJob on a push after a completed review", () => {
+  // Two files: the push below touches only src/util.ts.
+  const UTIL_PATCH = ["@@ -1,2 +1,3 @@", " export const x = 1;", "+export const y = x / 0;", " export const z = 2;"].join("\n");
+  const FILES: FileDiffInput[] = [
+    { path: "src/app.ts", changeType: "modified", patch: APP_PATCH },
+    { path: "src/util.ts", changeType: "modified", patch: UTIL_PATCH },
+  ];
+  const appFinding = modelFinding();
+  const utilFinding = modelFinding({ file: "src/util.ts", startLine: 2, endLine: 2, title: "y divides by zero" });
+  const both = { code_review: { findings: [appFinding, utilFinding] }, walkthrough: WALKTHROUGH };
+  const fixed = { code_review: { findings: [] }, walkthrough: WALKTHROUGH };
+
+  async function reviewFirst() {
+    const first = deps({}, both, { anthropic: "k" }, { head: "h1", files: FILES });
+    await enqueue({ repositoryId, number: 42, headSha: "h1", trigger: "manual" });
+    await runJob((await claimNext())!, first.runDeps);
+    expect(first.published.inline).toHaveLength(2);
+  }
+
+  async function push(head: string) {
+    await enqueue({ repositoryId, number: 42, headSha: head, trigger: "webhook", event: "push" });
+    const job = (await claimNext())!;
+    return { job, stored: () => prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } }) };
+  }
+
+  function reviewPrompts(model: { requests: { schemaName: string; prompt: string }[] }) {
+    return model.requests.filter((r) => r.schemaName === "code_review").map((r) => r.prompt).join("\n");
+  }
+
+  it("reviews only the files changed since then and keeps the other findings open", async () => {
+    await reviewFirst();
+    const second = deps({}, fixed, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    const { job, stored } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    expect(second.reads).toContain("compare:h1..h2");
+    const prompts = reviewPrompts(second.model);
+    expect(prompts).toContain("export const y = x / 0;");
+    expect(prompts).not.toContain("const b = a + 1;");
+    const result = (await stored()).result as { status: string; findings: { file: string }[]; incremental: unknown };
+    expect(result.status).toBe("completed");
+    expect(result.incremental).toEqual({ fromSha: "h1", toSha: "h2", files: ["src/util.ts"], carried: 1 });
+    expect(result.findings.map((f) => f.file)).toEqual(["src/app.ts"]);
+    // The carried blocker still blocks, and nothing is posted twice.
+    expect((await stored()).verdict).toBe("blocked");
+    expect(second.published.inline).toEqual([]);
+    expect(second.published.summaries.at(-1)).toContain("Incremental review of `h1..h2`");
+    const rows = await prisma.finding.findMany({ where: { repositoryId, number: 42 }, orderBy: { file: "asc" } });
+    expect(rows.map((row) => [row.file, row.state])).toEqual([
+      ["src/app.ts", "open"],
+      ["src/util.ts", "resolved"],
+    ]);
+  });
+
+  it("reviews everything again after a force push", async () => {
+    await reviewFirst();
+    const second = deps({}, both, { anthropic: "k" }, { head: "h2", files: FILES, compare: null });
+    const { job, stored } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    expect(reviewPrompts(second.model)).toContain("const b = a + 1;");
+    const result = (await stored()).result as { incremental?: unknown; warnings: string[] };
+    expect(result.incremental).toBeUndefined();
+    expect(result.warnings.join("\n")).toMatch(/no longer an ancestor/);
+  });
+
+  it("reviews everything when the comparison fails", async () => {
+    await reviewFirst();
+    const second = deps({}, both, { anthropic: "k" }, { head: "h2", files: FILES, compare: new Error("502 Bad Gateway") });
+    const { job, stored } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    const result = (await stored()).result as { incremental?: unknown; warnings: string[] };
+    expect(result.incremental).toBeUndefined();
+    expect(result.warnings.join("\n")).toMatch(/could not be compared: 502/);
+  });
+
+  it("reviews everything when full reviews on push are configured", async () => {
+    await reviewFirst();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { review: { blockOn: "major" }, triggers: { fullReviewOnPush: true } } },
+    });
+    const second = deps({}, both, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    const { job } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    expect(second.reads.filter((read) => read.startsWith("compare:"))).toEqual([]);
+    expect(reviewPrompts(second.model)).toContain("const b = a + 1;");
+  });
+
+  it("reviews everything when someone asks for it", async () => {
+    await reviewFirst();
+    const second = deps({}, both, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    await enqueue({ repositoryId, number: 42, headSha: "h2", trigger: "comment" });
+
+    await runJob((await claimNext())!, second.runDeps);
+
+    expect(second.reads.filter((read) => read.startsWith("compare:"))).toEqual([]);
+    expect(reviewPrompts(second.model)).toContain("const b = a + 1;");
+  });
+
+  it("reviews everything when the last review was partial", async () => {
+    await reviewFirst();
+    const last = await prisma.reviewJob.findFirstOrThrow({ where: { repositoryId, headSha: "h1" } });
+    await prisma.reviewJob.update({
+      where: { id: last.id },
+      data: { result: { ...(last.result as object), status: "partial" } },
+    });
+    const second = deps({}, both, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    const { job } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    expect(second.reads.filter((read) => read.startsWith("compare:"))).toEqual([]);
+    expect(reviewPrompts(second.model)).toContain("const b = a + 1;");
+  });
+
+  it("does not carry a finding dismissed since the last review", async () => {
+    await reviewFirst();
+    await prisma.finding.updateMany({
+      where: { repositoryId, number: 42, file: "src/app.ts" },
+      data: { state: "ignored", ignoredAt: new Date(), ignoreReason: "false_positive" },
+    });
+    const second = deps({}, fixed, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    const { job, stored } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    const result = (await stored()).result as { findings: unknown[]; incremental: { carried: number } };
+    expect(result.findings).toEqual([]);
+    expect(result.incremental.carried).toBe(0);
+  });
+
+  it.each([
+    ["the model settings", { llm: { temperature: 0.7 } }],
+    ["the ignored paths", { ignorePaths: ["src/app.ts"] }],
+  ])("reviews everything when %s changed since the last review", async (_, change) => {
+    await reviewFirst();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { review: { blockOn: "major" }, ...change } },
+    });
+    const second = deps({}, fixed, { anthropic: "k" }, { head: "h2", files: FILES, compare: ["src/util.ts"] });
+    const { job, stored } = await push("h2");
+
+    await runJob(job, second.runDeps);
+
+    expect(second.reads.filter((read) => read.startsWith("compare:"))).toEqual([]);
+    const result = (await stored()).result as { incremental?: unknown; warnings: string[] };
+    expect(result.incremental).toBeUndefined();
+    expect(result.warnings.join("\n")).toMatch(/review settings changed/);
+    expect((await stored()).verdict).not.toBe("blocked");
   });
 });
