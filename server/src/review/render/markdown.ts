@@ -173,14 +173,28 @@ export interface WalkthroughOptions {
   effort?: boolean;
   // The high-level summary goes in the walkthrough rather than the description.
   highLevelSummary?: boolean;
+  // output.walkthroughLabels and output.walkthroughBlastRadius.
+  labels?: boolean;
+  blastRadius?: boolean;
 }
 
 // Display options from a config's output settings. Missing settings, as in a
 // job stored before they existed, render as those jobs were.
-export function walkthroughOptions(output: { estimateEffort?: boolean; highLevelSummaryPlacement?: string } | undefined): WalkthroughOptions {
+export function walkthroughOptions(
+  output:
+    | {
+        estimateEffort?: boolean;
+        highLevelSummaryPlacement?: string;
+        walkthroughLabels?: boolean;
+        walkthroughBlastRadius?: boolean;
+      }
+    | undefined,
+): WalkthroughOptions {
   return {
     effort: output?.estimateEffort !== false,
     highLevelSummary: output?.highLevelSummaryPlacement === "walkthrough",
+    labels: output?.walkthroughLabels !== false,
+    blastRadius: output?.walkthroughBlastRadius !== false,
   };
 }
 
@@ -198,9 +212,9 @@ function walkthroughSection(
   const heading = summary ? "## High-level summary" : "## Summary";
   const lines = ["", sanitize(summary ?? walkthrough.overview)];
   const meta = [
-    walkthrough.labels.length ? `🏷️ Labels: ${walkthrough.labels.map((l) => `\`${codeCell(l)}\``).join(", ")}` : "",
+    options.labels !== false && walkthrough.labels.length ? `🏷️ Labels: ${walkthrough.labels.map((l) => `\`${codeCell(l)}\``).join(", ")}` : "",
     options.effort !== false ? `⏱️ Review effort: ${walkthrough.estimatedEffort}/5` : "",
-    walkthrough.blastRadius ? `💥 Blast radius: ${walkthrough.blastRadius}` : "",
+    options.blastRadius !== false && walkthrough.blastRadius ? `💥 Blast radius: ${walkthrough.blastRadius}` : "",
   ].filter(Boolean);
   if (meta.length) lines.push("", meta.join(" · "));
   if (walkthrough.fileSummaries.length) {

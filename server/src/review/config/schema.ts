@@ -123,6 +123,10 @@ const outputShape = {
   highLevelSummary: z.boolean(),
   highLevelSummaryPlacement: z.enum(HIGH_LEVEL_SUMMARY_PLACEMENTS),
   highLevelSummaryInstructions: z.string().max(2000),
+  // The labels and blast radius segments of the walkthrough's meta line. Only
+  // the comment text: the model still estimates both, for the native labels.
+  walkthroughLabels: z.boolean(),
+  walkthroughBlastRadius: z.boolean(),
 };
 
 // Phrases, logins, labels and branch names; matching rules are in filters.ts.
@@ -243,6 +247,8 @@ export const DEFAULT_CONFIG: Config = {
     highLevelSummary: true,
     highLevelSummaryPlacement: "description",
     highLevelSummaryInstructions: "",
+    walkthroughLabels: true,
+    walkthroughBlastRadius: true,
   },
   triggers: {
     review: "published",

@@ -63,6 +63,8 @@ export interface ConfigOverride {
     highLevelSummary?: boolean
     highLevelSummaryPlacement?: HighLevelSummaryPlacement
     highLevelSummaryInstructions?: string
+    walkthroughLabels?: boolean
+    walkthroughBlastRadius?: boolean
   }
   triggers?: {
     review?: ReviewTrigger
@@ -141,6 +143,8 @@ export interface EffectiveConfig {
     highLevelSummary: boolean
     highLevelSummaryPlacement: HighLevelSummaryPlacement
     highLevelSummaryInstructions: string
+    walkthroughLabels: boolean
+    walkthroughBlastRadius: boolean
   }
   triggers: {
     review: ReviewTrigger

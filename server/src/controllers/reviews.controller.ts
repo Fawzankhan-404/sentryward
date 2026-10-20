@@ -258,7 +258,9 @@ export async function getReviewMarkdown(req: Request, res: Response) {
   }
   // Rendered as the summary comment was, so the copy matches the forge. Jobs
   // stored before output.findingCounts or output.reviewStats existed showed
-  // those lines; jobs stored before output.agentPromptAll existed had no prompt.
+  // those lines, and before output.walkthroughLabels or
+  // output.walkthroughBlastRadius those segments; jobs stored before
+  // output.agentPromptAll existed had no prompt.
   const stored = review.resolvedConfig as {
     config?: {
       output?: {
@@ -267,6 +269,8 @@ export async function getReviewMarkdown(req: Request, res: Response) {
         agentPromptAll?: boolean;
         estimateEffort?: boolean;
         highLevelSummaryPlacement?: string;
+        walkthroughLabels?: boolean;
+        walkthroughBlastRadius?: boolean;
       };
     };
   } | null;

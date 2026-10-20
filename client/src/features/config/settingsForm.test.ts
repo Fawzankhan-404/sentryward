@@ -53,6 +53,8 @@ const schema: ConfigSchema = {
       highLevelSummary: true,
       highLevelSummaryPlacement: "description",
       highLevelSummaryInstructions: "",
+      walkthroughLabels: true,
+      walkthroughBlastRadius: true,
     },
     triggers: {
       review: "published",

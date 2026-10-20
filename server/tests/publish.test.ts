@@ -307,6 +307,19 @@ describe("walkthrough placement and labels", () => {
     expect(calls.summaries[0]).not.toContain("<sub>Reviewed `");
   });
 
+  it("leaves the walkthrough's labels and blast radius out when turned off", async () => {
+    const { calls, result } = await publish({ walkthroughLabels: false, walkthroughBlastRadius: false });
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true, labels: false, blastRadius: false })]);
+    expect(calls.summaries[0]).not.toMatch(/Labels:|Blast radius:/);
+    expect(calls.summaries[0]).toContain("Review effort:");
+
+    const own = await publish({ postSummary: false, walkthroughBlastRadius: false });
+    expect(own.calls.comments[0]!.body).toBe(
+      `${walkthroughMarkdown(own.result, { blastRadius: false })}\n${WALKTHROUGH_MARKER}\n`,
+    );
+    expect(own.calls.comments[0]!.body).not.toContain("Blast radius:");
+  });
+
   it("leaves the finding counts line out when findingCounts is off", async () => {
     const { calls, result } = await publish({ findingCounts: false });
     expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true, counts: false })]);

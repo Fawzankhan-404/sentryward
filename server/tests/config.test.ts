@@ -256,6 +256,8 @@ describe("parseRepoFile", () => {
       "  review_stats: false",
       "  agent_prompts: false",
       "  agent_prompt_all: true",
+      "  walkthrough_labels: false",
+      "  walkthrough_blast_radius: false",
       "",
     ].join("\n");
     const { override, warnings } = parseRepoFile(".sentryward.yaml", yaml);
@@ -279,6 +281,8 @@ describe("parseRepoFile", () => {
         reviewStats: false,
         agentPrompts: false,
         agentPromptAll: true,
+        walkthroughLabels: false,
+        walkthroughBlastRadius: false,
       },
     });
   });

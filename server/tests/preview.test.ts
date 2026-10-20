@@ -88,6 +88,14 @@ describe("previewPublication", () => {
       "github",
     );
     expect(none.summaryComment).not.toMatch(/mermaid|Review effort|#12|#31/);
+    // Not parts the model is asked for, so still shown.
+    expect(none.summaryComment).toContain("🏷️ Labels: `api`, `feature` · 💥 Blast radius: medium");
+
+    const noMeta = await previewPublication(
+      config({ output: { estimateEffort: false, walkthroughLabels: false, walkthroughBlastRadius: false } }),
+      "github",
+    );
+    expect(noMeta.summaryComment).not.toMatch(/Labels:|Review effort|Blast radius:/);
     expect(none.pr.description).toBe("Closes #12");
 
     const inWalkthrough = await previewPublication(config({ output: { highLevelSummaryPlacement: "walkthrough" } }), "github");

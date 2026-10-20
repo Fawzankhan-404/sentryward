@@ -336,6 +336,19 @@ describe("GET /api/reviews/:id and /markdown", () => {
     expect(res.text).not.toContain("<sub>Reviewed `");
   });
 
+  it("leaves out the walkthrough's labels and blast radius when the review's config turned them off", async () => {
+    const job = await completedJob();
+    await prisma.reviewJob.update({
+      where: { id: job.id },
+      data: { resolvedConfig: { config: { output: { walkthroughLabels: false, walkthroughBlastRadius: false } } } },
+    });
+
+    const res = await request(app).get(`/api/reviews/${job.id}/markdown`).set("Cookie", cookie);
+
+    expect(res.text).toBe(toMarkdown(await sampleResult(), { labels: false, blastRadius: false, agentPrompt: false }));
+    expect(res.text).not.toMatch(/Labels:|Blast radius:/);
+  });
+
   it("leaves out the finding counts line when the review's config turned it off", async () => {
     const job = await completedJob();
     await prisma.reviewJob.update({

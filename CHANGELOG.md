@@ -10,6 +10,12 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- `output.walkthrough_labels` and `output.walkthrough_blast_radius` (on by
+  default, "Show labels in the summary" and "Show blast radius in the summary"
+  on the Display tab) hide the labels and blast radius segments of the
+  walkthrough's meta line in the summary comment and the copied markdown,
+  without dropping the rest of the walkthrough. The native PR/MR labels
+  (`output.blast_radius_label`, `output.effort_label`) are unaffected.
 - `output.finding_counts` (on by default, "Show finding counts" on the
   Display tab) turns off the findings-count line under the verdict in the
   summary comment and the copied markdown, without dropping the rest of the
