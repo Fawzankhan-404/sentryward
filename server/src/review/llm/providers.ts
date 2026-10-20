@@ -1,7 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, NoObjectGeneratedError, Output, type LanguageModel } from "ai";
+import { generateText, NoObjectGeneratedError, Output, streamText, type LanguageModel } from "ai";
 import type { z } from "zod";
 import type { Config } from "../config/schema.ts";
 import { excerpt, formatInstruction, parseLenient } from "./format.ts";
@@ -141,8 +141,16 @@ export function createGenerate(keys: ApiKeys, endpoint?: Endpoint, baseUrls: Pro
     };
 
     if (!native) {
-      const result = await generateText(call);
-      return respond(lenient(result.text), result.usage);
+      // Stream so bytes keep flowing: a self-hosted gateway behind Cloudflare
+      // 524s a non-streaming generation that outlives the origin timeout, but
+      // never a stream that is actively delivering. Draining fullStream keeps
+      // the connection alive and surfaces provider errors as an `error` part,
+      // which we rethrow so generateWithFallback can fall back as before.
+      const result = streamText(call);
+      for await (const part of result.fullStream) {
+        if (part.type === "error") throw part.error;
+      }
+      return respond(lenient(await result.text), await result.usage);
     }
     try {
       const result = await generateText({

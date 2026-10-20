@@ -57,6 +57,13 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Fixed
 
+- Reviews through a self-hosted LLM gateway behind a proxy (such as Cloudflare)
+  no longer fail with an empty-message `AI_APICallError`. The proxied model path
+  now streams the response instead of waiting for the whole completion, so a
+  long generation keeps the connection active and does not trip the proxy's
+  origin timeout (e.g. Cloudflare's 524). Behaviour on the official provider
+  APIs is unchanged.
+
 - A partial or failed review with no findings no longer shows the reassuring
   "Nothing in this change needs attention." empty state. It now says review
   coverage was incomplete, so incomplete runs are not mistaken for all-clears.
