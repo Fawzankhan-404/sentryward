@@ -67,6 +67,21 @@ export function useLlmModels(provider: LlmProvider | null) {
   })
 }
 
+export type ModelTestResult =
+  | { ok: true; latencyMs: number; inputTokens: number; outputTokens: number }
+  | { ok: false; reason: "revoked" | "model" | "unreachable" | "output"; message: string }
+
+// A test changes nothing stored, so nothing is invalidated.
+export function useTestLlmModel() {
+  return useMutation({
+    mutationFn: ({ provider, model }: { provider: LlmProvider; model: string }) =>
+      api<{ result: ModelTestResult }>(`/settings/api-keys/${provider}/test`, {
+        method: "POST",
+        body: JSON.stringify({ model }),
+      }),
+  })
+}
+
 export function useSaveApiKey() {
   const queryClient = useQueryClient()
   return useMutation({

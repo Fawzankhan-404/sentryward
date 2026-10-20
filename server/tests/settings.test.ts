@@ -5,7 +5,10 @@ import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { hashPassword } from "../src/lib/password.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { apiKeysFor, llmCredentialsFor } from "../src/services/llm.ts";
+import { testLlmModel } from "../src/services/llmConnection.ts";
+import { fetchStub } from "./helpers/fetchStub.ts";
 import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
+import { fakeModel } from "./helpers/model.ts";
 import { createUser } from "./helpers/users.ts";
 
 const PASSWORD = "correct-horse";
@@ -40,6 +43,7 @@ describe("authentication", () => {
     ["get", "/api/settings/api-keys"],
     ["get", "/api/settings/api-keys/anthropic/status"],
     ["get", "/api/settings/api-keys/anthropic/models"],
+    ["post", "/api/settings/api-keys/anthropic/test"],
     ["put", "/api/settings/api-keys/anthropic"],
     ["delete", "/api/settings/api-keys/anthropic"],
     ["delete", "/api/settings/account"],
@@ -272,12 +276,17 @@ describe("a key saved under another ENCRYPTION_KEY", () => {
     expect(byProvider.openai).toMatchObject({ stored: true, last4: "5678", undecryptable: false });
   });
 
-  it("answers status and model requests with a 409", async () => {
+  it("answers status, model and test requests with a 409", async () => {
     for (const path of ["status", "models"]) {
       const res = await request(app).get(`/api/settings/api-keys/anthropic/${path}`).set("Cookie", cookie);
       expect(res.status).toBe(409);
       expect(res.body.message).toMatch(/can't be decrypted/);
     }
+    const test = await request(app)
+      .post("/api/settings/api-keys/anthropic/test")
+      .set("Cookie", cookie)
+      .send({ model: "anthropic/claude-sonnet-5-5" });
+    expect(test.status).toBe(409);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -487,5 +496,120 @@ describe("DELETE /api/settings/account", () => {
     const res = await request(app).delete("/api/settings/account").set("Cookie", cookie).send({ password: PASSWORD });
 
     expect(res.status).toBe(204);
+  });
+});
+
+// The OpenAI-compatible stream an Ollama host answers chat completions with.
+function chatStream(content: string) {
+  const chunk = (extra: Record<string, unknown>) =>
+    `data: ${JSON.stringify({ id: "chatcmpl-1", object: "chat.completion.chunk", created: 0, model: "qwen3", ...extra })}`;
+  return [
+    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }),
+    chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+    chunk({ choices: [], usage: { prompt_tokens: 40, completion_tokens: 5, total_tokens: 45 } }),
+    "data: [DONE]",
+    "",
+  ].join("\n\n");
+}
+
+describe("POST /api/settings/api-keys/:provider/test", () => {
+  const CHAT_URL = /^http:\/\/ollama\.test\/v1\/chat\/completions$/;
+
+  async function storeOllama() {
+    await prisma.llmCredential.create({
+      data: { workspaceId, provider: "ollama", encryptedKey: encrypt("ollama-secret-1234"), baseUrl: "http://ollama.test/v1" },
+    });
+  }
+
+  function testModel(provider: string, model: string) {
+    return request(app).post(`/api/settings/api-keys/${provider}/test`).set("Cookie", cookie).send({ model });
+  }
+
+  it("runs one generation with the stored credential and reports success", async () => {
+    await storeOllama();
+    const { fetch, calls } = fetchStub([
+      { method: "POST", url: CHAT_URL, body: chatStream('{"ok":true}'), headers: { "content-type": "text/event-stream" } },
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const res = await testModel("ollama", "ollama/qwen3");
+
+    expect(res.status).toBe(200);
+    expect(res.body.result).toMatchObject({ ok: true, inputTokens: 40, outputTokens: 5 });
+    expect(JSON.stringify(res.body)).not.toContain("secret");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.authorization).toBe("Bearer ollama-secret-1234");
+    expect(JSON.parse(calls[0]!.body!)).toMatchObject({ model: "qwen3", max_tokens: 256 });
+  });
+
+  it.each([
+    [404, "model", /does not serve this model/],
+    [401, "revoked", /rejected this key/],
+  ])("reports a host %s as %s", async (status, reason, message) => {
+    await storeOllama();
+    vi.stubGlobal(
+      "fetch",
+      fetchStub([{ method: "POST", url: CHAT_URL, status, body: { error: { message: "model 'qwen9' not found" } } }]).fetch,
+    );
+
+    const res = await testModel("ollama", "ollama/qwen9");
+
+    expect(res.status).toBe(200);
+    expect(res.body.result).toMatchObject({ ok: false, reason });
+    expect(res.body.result.message).toMatch(message);
+  });
+
+  it("refuses another provider's model on an official API", async () => {
+    await prisma.llmCredential.create({
+      data: { workspaceId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
+    });
+
+    const res = await testModel("anthropic", "openai/gpt-5");
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors.model).toEqual(["This connection can only run anthropic/... models"]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("validates the model id", async () => {
+    await storeOllama();
+
+    expect((await testModel("ollama", "")).status).toBe(400);
+    const unknown = await testModel("ollama", "qwen3");
+    expect(unknown.status).toBe(400);
+    expect(unknown.body.errors.model[0]).toMatch(/provider\/model/);
+  });
+
+  it("returns 404 without a stored credential, including another workspace's", async () => {
+    const other = await createUser("other@example.com");
+    await prisma.llmCredential.create({
+      data: { workspaceId: other.workspace.id, provider: "anthropic", encryptedKey: encrypt("sk-ant-other-1234") },
+    });
+
+    const res = await testModel("anthropic", "anthropic/claude-sonnet-5-5");
+
+    expect(res.status).toBe(404);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("testLlmModel", () => {
+  it("builds the official client for a connection without a host", async () => {
+    const { generate, requests } = fakeModel({ connection_test: { ok: true } });
+    const generateFor = vi.fn(() => generate);
+
+    const result = await testLlmModel("anthropic", "anthropic/claude-sonnet-5-5", { apiKey: "sk-ant" }, generateFor);
+
+    expect(result).toEqual({ ok: true, latencyMs: 5, inputTokens: 100, outputTokens: 20 });
+    expect(generateFor).toHaveBeenCalledWith({ anthropic: "sk-ant" }, undefined);
+    expect(requests[0]!.model).toBe("anthropic/claude-sonnet-5-5");
+  });
+
+  it("reports a reply that does not parse", async () => {
+    const { generate } = fakeModel({ connection_test: new Error("No object generated: no JSON object. Reply: hi") });
+
+    const result = await testLlmModel("openai", "openai/gpt-5", { apiKey: "sk" }, () => generate);
+
+    expect(result).toMatchObject({ ok: false, reason: "output" });
   });
 });

@@ -279,4 +279,74 @@ describe("LLM Connections page", () => {
     await chooseFilter("Status", "Unknown")
     expect(providers()).toEqual(["Ollama"])
   })
+
+  describe("testing a model", () => {
+    const routes = (result: unknown) => ({
+      "GET /api/settings/api-keys": { keys: [storedAnthropic, ...noKeys.keys.slice(1)] },
+      "GET /api/settings/api-keys/anthropic/status": { status: "active" },
+      "GET /api/settings/api-keys/anthropic/models": { models: ["anthropic/claude-haiku-5-5", "anthropic/claude-sonnet-5-5"] },
+      "POST /api/settings/api-keys/anthropic/test": result,
+    })
+
+    async function openTest() {
+      await userEvent.click(await screen.findByRole("button", { name: "Actions for Anthropic" }))
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Test model" }))
+      return screen.findByRole("dialog")
+    }
+
+    it("runs a model picked from the connection and reports success", async () => {
+      const fetchSpy = mockApi(
+        routes({ result: { ok: true, latencyMs: 812, inputTokens: 54, outputTokens: 6 } }),
+      )
+      renderWithProviders(<App />, { route: "/llm-connections" })
+
+      const dialog = await openTest()
+      expect(within(dialog).getByRole("button", { name: "Run test" })).toBeDisabled()
+      await userEvent.click(within(dialog).getByRole("button", { name: "Choose Model from the connection" }))
+      await userEvent.click(await screen.findByRole("option", { name: "anthropic/claude-sonnet-5-5" }))
+      await userEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
+
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(
+        "Responded in 812 ms, 54 input / 6 output tokens",
+      )
+      const [post] = calls(fetchSpy, "POST", "/api/settings/api-keys/anthropic/test")
+      expect(bodyOf(post![1])).toEqual({ model: "anthropic/claude-sonnet-5-5" })
+    })
+
+    it("shows the provider's error and clears it when the model changes", async () => {
+      mockApi(
+        routes({
+          result: { ok: false, reason: "model", message: "The API host does not serve this model: not_found_error" },
+        }),
+      )
+      renderWithProviders(<App />, { route: "/llm-connections" })
+
+      const dialog = await openTest()
+      const input = within(dialog).getByRole("textbox", { name: "Model" })
+      await userEvent.type(input, "anthropic/claude-nope")
+      await userEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("does not serve this model")
+      await userEvent.type(input, "2")
+      expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("shows a validation error under the model field", async () => {
+      mockApi({
+        ...routes({}),
+        "POST /api/settings/api-keys/anthropic/test": () =>
+          jsonResponse(400, {
+            message: "Validation failed",
+            errors: { model: ["This connection can only run anthropic/... models"] },
+          }),
+      })
+      renderWithProviders(<App />, { route: "/llm-connections" })
+
+      const dialog = await openTest()
+      await userEvent.type(within(dialog).getByRole("textbox", { name: "Model" }), "openai/gpt-5")
+      await userEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
+
+      expect(await within(dialog).findByText("This connection can only run anthropic/... models")).toBeInTheDocument()
+    })
+  })
 })

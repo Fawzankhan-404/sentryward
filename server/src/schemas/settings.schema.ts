@@ -29,6 +29,10 @@ export const saveApiKeySchema = z.object({
   baseUrl: z.url({ protocol: /^https?$/, error: "Enter an http or https URL" }).max(500).optional(),
 });
 
+export const testModelSchema = z.object({
+  model: z.string().trim().min(1, "Choose a model").max(200),
+});
+
 export const deleteAccountSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });

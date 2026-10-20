@@ -352,6 +352,8 @@ Add and verify provider credentials in LLM Connections, then select one in Confi
 
 A connection with a custom host sends every model call to that compatible proxy. The model's provider prefix still picks the request format (`openai/` uses chat completions), and the rest of the id is passed through as is, slashes and parentheses included. Without a custom host, every configured model must use the selected connection's provider.
 
+To check a model before relying on it, choose **Test model** in a connection's actions menu. It runs one short generation with the stored credential, the same way a review would, and reports the response time and token usage, or why it failed: the key was rejected, the host does not serve that model, the host could not be reached, or the model did not answer in the JSON format reviews need. The test uses a small amount of the connection's quota.
+
 For 9router, save its key and host under OpenAI in LLM Connections, select the OpenAI connection in Configuration > LLM, and use a model such as `openai/cx/gpt-5.6-sol(medium)`.
 
 The worker runs in a container, where `localhost` is the container itself; `host.docker.internal` reaches a proxy running on the host.
@@ -484,6 +486,12 @@ so scripts written before workspaces keep working. Routes under
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 | GET    | `/api/config/global` | The workspace's global review config, and what it resolves to with each value's source |
 | PUT    | `/api/config/global` | Workspace admins: `{ settings }`, replaces the global review config; `{}` resets it |
+| GET    | `/api/settings/api-keys` | Every LLM provider, with whether the workspace stored a credential, its key's last four characters, its custom host and whether the server has a key of its own |
+| PUT    | `/api/settings/api-keys/:provider` | Workspace admins: `{ apiKey?, baseUrl? }`, verifies the credential with the provider and stores the key encrypted |
+| DELETE | `/api/settings/api-keys/:provider` | Workspace admins: removes the stored credential |
+| GET    | `/api/settings/api-keys/:provider/status` | `{ status }`: `active`, `revoked` when the provider rejects the key, or `unreachable` |
+| GET    | `/api/settings/api-keys/:provider/models` | The model ids the connection lists, prefixed with its provider; 400 when the host rejects the key or is down |
+| POST   | `/api/settings/api-keys/:provider/test` | `{ model }`, runs one minimal generation with the stored credential; returns `{ result }` with latency and token usage, or `ok: false` with a `reason` (`revoked`, `model`, `unreachable`, `output`) and message. 400 when an official API is given another provider's model; 409 when the stored key can't be decrypted |
 | PUT    | `/api/settings/avatar` | Raw PNG, JPEG or WebP body (512 KB at most; the dashboard uploads a 256px JPEG); sets the caller's profile picture |
 | DELETE | `/api/settings/avatar` | Removes the caller's profile picture, so their initials show again |
 | GET    | `/api/users/:id/avatar` | A user's profile picture, for any signed-in user; 404 when they have none |
