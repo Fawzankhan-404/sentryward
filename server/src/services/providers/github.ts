@@ -1,6 +1,5 @@
 import { createHmac } from "node:crypto";
 import { env } from "../../config/env.ts";
-import { decrypt } from "../../lib/crypto.ts";
 import { HttpError } from "../../lib/httpError.ts";
 import { parseJson, REVIEW_COMMAND, safeEqual } from "../../lib/webhook.ts";
 import type { ForgeConnection } from "../../generated/prisma/client.ts";
@@ -10,6 +9,7 @@ import { githubConnectSchema } from "../../schemas/connections.schema.ts";
 import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import { getGitHubApp, githubConfigured } from "../githubApp.ts";
 import type { HeaderReader, ProviderDefinition, RepoWithConnection, WebhookOutcome } from "./types.ts";
+import { decryptToken } from "./token.ts";
 
 // "synchronize" brings new commits; the rest make a change reviewable.
 const PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
@@ -34,7 +34,7 @@ function adapterFor(connection: ForgeConnection): GitHubAdapter {
     }
     return new GitHubAdapter({
       host: connection.host,
-      token: async () => decrypt(encryptedToken),
+      token: async () => decryptToken(encryptedToken, "GitHub"),
       selfLogin: connection.accountLogin,
       repoSource: "user",
     });

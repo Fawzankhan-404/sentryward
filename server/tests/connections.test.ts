@@ -6,6 +6,7 @@ import { env } from "../src/config/env.ts";
 import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
+import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
 import { createTeam, createUser } from "./helpers/users.ts";
 
 let cookie: string;
@@ -209,6 +210,17 @@ describe("GET /api/connections/:id/status", () => {
   it("reports a refused token as revoked", async () => {
     const connection = await gitlabConnection();
     vi.stubGlobal("fetch", fetchStub([{ url: /gitlab\.com\/api\/v4\/user$/, status: 401 }]).fetch);
+
+    expect(await statusFor(connection.id)).toBe("revoked");
+  });
+
+  it("reports a token this server can no longer decrypt as revoked", async () => {
+    const connection = await gitlabConnection();
+    await prisma.forgeConnection.update({
+      where: { id: connection.id },
+      data: { encryptedToken: encryptWithOtherKey("glpat-x") },
+    });
+    vi.stubGlobal("fetch", fetchStub([]).fetch);
 
     expect(await statusFor(connection.id)).toBe("revoked");
   });

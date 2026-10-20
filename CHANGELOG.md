@@ -67,6 +67,15 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Fixed
 
+- Secrets stored under a previous `ENCRYPTION_KEY` no longer cause raw crypto
+  errors or 500s. API keys are still listed, shown as "Unreadable" with a
+  "Re-enter key" badge, and checking or listing models for one returns a 409
+  asking to re-enter it. Forge connections with an unreadable token show as
+  revoked and ask to be reconnected. A review that needs an unreadable key
+  fails with a message saying where to re-enter it. A repository whose webhook
+  secret cannot be read rejects deliveries with the usual 401 and logs a
+  warning; disabling and enabling the repository registers a fresh secret.
+
 - A long-running review is no longer falsely requeued and eventually marked
   `failed` with "Worker stopped responding". The worker now refreshes a job's
   lock on a heartbeat while it runs (`WORKER_HEARTBEAT_INTERVAL_MS`), so

@@ -17,6 +17,8 @@ export interface ApiKey {
   provider: LlmProvider
   stored: boolean
   last4: string | null
+  // Saved under a different server ENCRYPTION_KEY; only replacing it helps.
+  undecryptable: boolean
   baseUrl: string | null
   updatedAt: string | null
   serverDefault: boolean

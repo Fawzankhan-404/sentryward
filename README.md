@@ -278,7 +278,9 @@ before `up`.
 - **Backups:** the `pgdata` volume holds everything (for example
   `docker compose -f docker-compose.prod.yml exec db pg_dump -U sentryward sentryward`).
   Back up `ENCRYPTION_KEY` separately and keep it stable: stored forge tokens and
-  model keys cannot be decrypted without it.
+  model keys cannot be decrypted without it. After a key change, API keys show as
+  unreadable until they are re-entered, forge connections show as inactive until
+  reconnected, and repository webhooks need the repository disabled and enabled again.
 - **Model endpoints on the host** (such as Ollama): the production file does not add
   `host.docker.internal`. Add an `extra_hosts` entry to the worker and server if you
   need it.

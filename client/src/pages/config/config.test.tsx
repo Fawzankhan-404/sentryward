@@ -186,10 +186,10 @@ const globalRoutes = (extra: Record<string, unknown> = {}) => ({
   "GET /api/repos": { repos: [] },
   "GET /api/settings/api-keys": {
     keys: [
-      { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
-      { provider: "openai", stored: true, last4: "9rtr", baseUrl: null, updatedAt: "2026-10-04T00:00:00Z", serverDefault: false },
-      { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
-      { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+      { provider: "anthropic", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: true },
+      { provider: "openai", stored: true, last4: "9rtr", undecryptable: false, baseUrl: null, updatedAt: "2026-10-04T00:00:00Z", serverDefault: false },
+      { provider: "google", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
+      { provider: "ollama", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
     ],
   },
   ...extra,
@@ -495,10 +495,10 @@ describe("Configuration page", () => {
       globalRoutes({
         "GET /api/settings/api-keys": {
           keys: [
-            { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
-            { provider: "openai", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
-            { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
-            { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+            { provider: "anthropic", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: true },
+            { provider: "openai", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
+            { provider: "google", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
+            { provider: "ollama", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
           ],
         },
       }),
