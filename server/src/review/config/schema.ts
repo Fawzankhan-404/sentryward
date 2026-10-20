@@ -98,6 +98,8 @@ const outputShape = {
   // Resolve an inline thread once a later run no longer reports its finding,
   // and reopen it if the finding comes back.
   resolveFixedThreads: z.boolean(),
+  // The line under the verdict counting the findings by severity and bucket.
+  findingCounts: z.boolean(),
   // The line under the summary naming the commit, models, passes and files
   // reviewed.
   reviewStats: z.boolean(),
@@ -227,6 +229,7 @@ export const DEFAULT_CONFIG: Config = {
     postSummary: true,
     postCheck: true,
     resolveFixedThreads: true,
+    findingCounts: true,
     reviewStats: true,
     agentPrompts: true,
     agentPromptAll: true,

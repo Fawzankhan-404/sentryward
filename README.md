@@ -398,6 +398,7 @@ output:
   post_summary: true
   post_check: true
   resolve_fixed_threads: true  # resolve a finding's inline thread once it is fixed
+  finding_counts: true      # the findings-count line under the verdict
   review_stats: true        # the commit/models/coverage line under the summary
   agent_prompts: true       # a prompt for AI agents in each actionable inline comment
   agent_prompt_all: true    # one prompt for every finding in the summary comment

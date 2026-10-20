@@ -307,6 +307,12 @@ describe("walkthrough placement and labels", () => {
     expect(calls.summaries[0]).not.toContain("<sub>Reviewed `");
   });
 
+  it("leaves the finding counts line out when findingCounts is off", async () => {
+    const { calls, result } = await publish({ findingCounts: false });
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true, counts: false })]);
+    expect(calls.summaries[0]).not.toContain("in the sections below.");
+  });
+
   it("adds the agent prompts by default and leaves each out when turned off", async () => {
     const on = await publish({});
     expect(on.calls.summaries[0]).toContain("Prompt for all review comments with AI agents");

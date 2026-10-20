@@ -10,6 +10,10 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- `output.finding_counts` (on by default, "Show finding counts" on the
+  Display tab) turns off the findings-count line under the verdict in the
+  summary comment and the copied markdown, without dropping the rest of the
+  comment.
 - Static analysis results already on the forge are reported as findings,
   marked with the analyzer's name: check run annotations on GitHub (including
   CodeQL), and Code Quality and SAST reports from the head pipeline on GitLab.
