@@ -1,6 +1,16 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/lib/prisma.ts";
-import { claimNext, complete, enqueue, enqueueFromWebhook, fail, recoverStale } from "../src/worker/queue.ts";
+import {
+  cancelJob,
+  claimNext,
+  claimState,
+  complete,
+  enqueue,
+  enqueueFromWebhook,
+  fail,
+  heartbeat,
+  recoverStale,
+} from "../src/worker/queue.ts";
 
 let repositoryId: string;
 
@@ -152,6 +162,78 @@ describe("recoverStale", () => {
     await claimNext();
 
     expect(await recoverStale(15 * 60 * 1000, 3)).toBe(0);
+  });
+});
+
+describe("heartbeat", () => {
+  it("refreshes the lock so a slow-but-healthy job is not reclaimed", async () => {
+    const slow = await job("aaa");
+    const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await prisma.reviewJob.update({
+      where: { id: slow.id },
+      data: { status: "running", lockedAt: longAgo, attempts: 1 },
+    });
+
+    await heartbeat(slow.id);
+
+    // The bumped lock is now fresh, so recovery leaves the job running.
+    expect(await recoverStale(15 * 60 * 1000, 3)).toBe(0);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: slow.id } });
+    expect(stored.status).toBe("running");
+    expect(stored.lockedAt!.getTime()).toBeGreaterThan(longAgo.getTime());
+  });
+
+  it("does not touch a job that is no longer running", async () => {
+    const done = await job("aaa");
+    const claimed = (await claimNext())!;
+    await complete(claimed.id, { status: "completed", verdict: "pass" });
+
+    await heartbeat(done.id);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: done.id } });
+    expect(stored.status).toBe("completed");
+    expect(stored.lockedAt).toBeNull();
+  });
+});
+
+describe("claimState", () => {
+  it("is owned while the job runs under the same attempt", async () => {
+    await job("aaa");
+    const claimed = (await claimNext())!;
+
+    expect(await claimState(claimed.id, claimed.attempts)).toBe("owned");
+  });
+
+  it("reports a cancel from the dashboard", async () => {
+    await job("aaa");
+    const claimed = (await claimNext())!;
+    const { workspaceId } = await prisma.forgeConnection.findFirstOrThrow();
+    await cancelJob(claimed.id, workspaceId, "Cancelled by Dev");
+
+    expect(await claimState(claimed.id, claimed.attempts)).toBe("cancelled");
+  });
+
+  it("is lost once the job was failed", async () => {
+    await job("aaa");
+    const claimed = (await claimNext())!;
+    await fail(claimed.id, "Review exceeded the maximum run time");
+
+    expect(await claimState(claimed.id, claimed.attempts)).toBe("lost");
+  });
+
+  it("is lost once recovery requeued the job and another run claimed it", async () => {
+    await job("aaa");
+    const first = (await claimNext())!;
+    await prisma.reviewJob.update({
+      where: { id: first.id },
+      data: { lockedAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+    await recoverStale(15 * 60 * 1000, 3);
+    const second = (await claimNext())!;
+
+    expect(second.id).toBe(first.id);
+    expect(await claimState(first.id, first.attempts)).toBe("lost");
+    expect(await claimState(second.id, second.attempts)).toBe("owned");
   });
 });
 

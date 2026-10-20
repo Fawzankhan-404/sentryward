@@ -38,6 +38,15 @@ const envSchema = z.object({
   WORKER_USER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   WORKER_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // While a job runs its lock is refreshed on this interval, so stale-lock
+  // recovery only reclaims a worker that has actually gone silent, not a
+  // slow-but-healthy run. Keep it comfortably below WORKER_LOCK_TIMEOUT_MS so
+  // several beats land before the recovery cutoff.
+  WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 1000),
+  // The longest one review may take. A run past it is failed, healthy or not,
+  // and its slot freed, so a hung forge fetch cannot stall the worker. Raise it
+  // for repositories whose reviews run longer.
+  WORKER_MAX_RUN_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
   // Who may create an account: anyone, only holders of an invite link, or
   // nobody. The first account on an empty install is always allowed.
   REGISTRATION_MODE: z.enum(["open", "invite", "closed"]).default("open"),
@@ -59,9 +68,16 @@ const envSchema = z.object({
   ),
 });
 
-const parsedEnvSchema = envSchema.refine((data) => !data.SMTP_URL || data.MAIL_FROM, {
-  message: "MAIL_FROM is required when SMTP_URL is set",
-  path: ["MAIL_FROM"],
-});
+const parsedEnvSchema = envSchema
+  .refine((data) => !data.SMTP_URL || data.MAIL_FROM, {
+    message: "MAIL_FROM is required when SMTP_URL is set",
+    path: ["MAIL_FROM"],
+  })
+  // A heartbeat no faster than the lock timeout lets recovery reclaim jobs that
+  // are still running.
+  .refine((data) => data.WORKER_HEARTBEAT_INTERVAL_MS < data.WORKER_LOCK_TIMEOUT_MS, {
+    message: "WORKER_HEARTBEAT_INTERVAL_MS must be below WORKER_LOCK_TIMEOUT_MS",
+    path: ["WORKER_HEARTBEAT_INTERVAL_MS"],
+  });
 
 export const env = parsedEnvSchema.parse(process.env);

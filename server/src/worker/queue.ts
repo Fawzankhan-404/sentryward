@@ -184,9 +184,23 @@ export async function cancelJob(id: string, workspaceId: string, reason: string)
   return count;
 }
 
-export async function isCancelled(id: string): Promise<boolean> {
-  const job = await prisma.reviewJob.findUnique({ where: { id }, select: { status: true } });
-  return job?.status === "cancelled";
+// Refreshes the lock on a job still being worked, so recoverStale only reclaims
+// a job whose worker has actually gone silent, not a slow-but-healthy run.
+// Scoped to running jobs so a cancel or finish between beats is never undone.
+export async function heartbeat(id: string): Promise<void> {
+  await prisma.reviewJob.updateMany({
+    where: { id, status: "running" },
+    data: { lockedAt: new Date() },
+  });
+}
+
+// Whether a run still holds its claim. A job cancelled from the dashboard says
+// so; one failed on timeout, requeued by recovery or claimed again by another
+// worker (a later attempt) is lost, and the run must leave it alone.
+export async function claimState(id: string, attempts: number): Promise<"owned" | "cancelled" | "lost"> {
+  const job = await prisma.reviewJob.findUnique({ where: { id }, select: { status: true, attempts: true } });
+  if (job?.status === "cancelled") return "cancelled";
+  return job?.status === "running" && job.attempts === attempts ? "owned" : "lost";
 }
 
 // A worker that died mid-job leaves it running forever. Jobs locked longer than

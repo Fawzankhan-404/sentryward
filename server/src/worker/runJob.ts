@@ -29,7 +29,7 @@ import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
 import { incrementFor } from "./incremental.ts";
-import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
+import { claimState, CLOSED_REASON, complete } from "./queue.ts";
 import { findingTransitions, syncFindings, threadOperations, type ThreadOutcome } from "./syncFindings.ts";
 
 // How many recent dismissals to feed into the review prompt; bounded so a noisy
@@ -239,10 +239,13 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   // A person can cancel any running job, so it is always watched. Closing the
   // change cancels its queued jobs from the webhook; with abortOnClose this also
   // catches the rest: a close the webhook missed, and one that lands mid-review.
-  let cancelledBy: "manual" | "closed" | undefined;
+  // A run that lost its claim (failed on timeout, or recovered and claimed
+  // again) stops too, so it never publishes for a job it no longer owns.
+  let cancelledBy: "manual" | "closed" | "lost" | undefined;
   const watch = watchForClose(async () => {
-    if (await isCancelled(job.id)) {
-      cancelledBy = "manual";
+    const claim = await claimState(job.id, job.attempts);
+    if (claim !== "owned") {
+      cancelledBy = claim === "cancelled" ? "manual" : "lost";
       return true;
     }
     if (!config.triggers.abortOnClose) return false;
@@ -253,6 +256,11 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   }, deps.closeCheckIntervalMs ?? CLOSE_CHECK_INTERVAL_MS);
   const cancel = async (posted: boolean) => {
     watch.stop();
+    // The job belongs to whoever holds it now: the worker that failed it, or
+    // another run that claimed it again. complete() only checks the status, so
+    // writing here could finish that run's job, and a status could overwrite
+    // its pending one.
+    if (cancelledBy === "lost") return;
     const closed = cancelledBy === "closed";
     // Best effort, and only over what this run already put on the change.
     if (posted && config.output.postCheck) {
