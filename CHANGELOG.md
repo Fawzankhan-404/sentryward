@@ -61,6 +61,18 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Fixed
 
+- A long-running review is no longer falsely requeued and eventually marked
+  `failed` with "Worker stopped responding". The worker now refreshes a job's
+  lock on a heartbeat while it runs (`WORKER_HEARTBEAT_INTERVAL_MS`), so
+  stale-lock recovery only reclaims a worker that has actually gone silent, not
+  a slow-but-healthy run that crossed `WORKER_LOCK_TIMEOUT_MS`; the server
+  refuses to start when the heartbeat is not below the lock timeout.
+  `WORKER_MAX_RUN_MS` (30 minutes by default) caps how long a review may take:
+  a run past it is failed with an accurate reason and its concurrency slot is
+  freed, so one stuck job cannot stall the worker. A run that loses its job,
+  to that cap or to stale-lock recovery, stops and publishes nothing more, so a
+  retried review is no longer posted twice.
+
 - Reviews through a self-hosted LLM gateway behind a proxy (such as Cloudflare)
   no longer fail with an empty-message `AI_APICallError`. The proxied model path
   now streams the response instead of waiting for the whole completion, so a

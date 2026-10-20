@@ -5,7 +5,7 @@ import { ForgeCache } from "../src/review/forge/cache.ts";
 import { ForgeError } from "../src/review/forge/http.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
-import { cancelJob, claimNext, enqueue } from "../src/worker/queue.ts";
+import { cancelJob, claimNext, enqueue, fail } from "../src/worker/queue.ts";
 import { runJob, skipReason, walkthroughEnabled, type RunJobDeps } from "../src/worker/runJob.ts";
 import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
 import { fingerprint } from "../src/review/core/fingerprint.ts";
@@ -690,6 +690,54 @@ describe("runJob when cancelled from the dashboard", () => {
       expect(published.statuses).toEqual(["pending", "error"]);
     });
   }
+});
+
+describe("runJob when it loses its claim", () => {
+  const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+
+  it("stops and publishes nothing once the worker failed it on timeout", async () => {
+    const job = await claimedJob();
+    const { runDeps, model, published } = deps({}, answers);
+    runDeps.closeCheckIntervalMs = 5;
+    const signals: (AbortSignal | undefined)[] = [];
+    runDeps.generateFor = () => async (request) => {
+      signals.push(request.abortSignal);
+      await fail(job.id, "Review exceeded the maximum run time");
+      // Slower than the watch, so the loss is noticed mid-call.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return model.generate(request);
+    };
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "failed", error: "Review exceeded the maximum run time" });
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    expect(published.inline).toEqual([]);
+    expect(published.summaries).toHaveLength(1);
+    expect(published.statuses).toEqual(["pending"]);
+    expect(await prisma.finding.count()).toBe(0);
+  });
+
+  it("leaves a job another worker re-claimed to that worker", async () => {
+    const job = await claimedJob();
+    const { runDeps, model, published } = deps({}, answers);
+    runDeps.closeCheckIntervalMs = 5;
+    runDeps.generateFor = () => async (request) => {
+      // Recovery requeued it and another worker claimed it again.
+      await prisma.reviewJob.update({ where: { id: job.id }, data: { attempts: job.attempts + 1 } });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return model.generate(request);
+    };
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "running", attempts: job.attempts + 1, finishedAt: null });
+    expect(published.inline).toEqual([]);
+    expect(published.statuses).toEqual(["pending"]);
+  });
 });
 
 describe("runJob issues and cache", () => {

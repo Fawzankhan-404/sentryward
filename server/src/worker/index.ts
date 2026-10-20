@@ -1,25 +1,10 @@
 import { env } from "../config/env.ts";
 import { prisma } from "../lib/prisma.ts";
-import type { ReviewJob } from "../generated/prisma/client.ts";
-import { claimNext, fail, recoverStale } from "./queue.ts";
-import { runJob } from "./runJob.ts";
+import { execute } from "./execute.ts";
+import { claimNext, recoverStale } from "./queue.ts";
 
 let stopping = false;
 const running = new Set<Promise<void>>();
-
-async function execute(job: ReviewJob): Promise<void> {
-  console.log(`[worker] claimed job ${job.id} (attempt ${job.attempts})`);
-  try {
-    await runJob(job);
-    console.log(`[worker] finished job ${job.id}`);
-  } catch (err) {
-    console.error(`[worker] job ${job.id} failed`, err);
-    await fail(job.id, err instanceof Error ? err.message : String(err)).catch((failErr) => {
-      // Left running; stale-lock recovery retries or fails it later.
-      console.error(`[worker] could not record failure for job ${job.id}`, failErr);
-    });
-  }
-}
 
 // Claims are awaited one at a time; the work itself runs in the background up
 // to WORKER_CONCURRENCY jobs.
