@@ -28,6 +28,8 @@ export const FLAGS = [
   { name: "assessLinkedIssues", section: "output" },
   { name: "relatedIssues", section: "output" },
   { name: "highLevelSummary", section: "output" },
+  { name: "walkthroughLabels", section: "output" },
+  { name: "walkthroughBlastRadius", section: "output" },
   { name: "reviewOnPush", section: "triggers" },
   { name: "fullReviewOnPush", section: "triggers" },
   { name: "command", section: "triggers" },

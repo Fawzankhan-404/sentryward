@@ -116,6 +116,15 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Prompt for all review comments",
     description: "Add one prompt covering every finding to the summary comment, to hand the whole review to a coding agent.",
   },
+  walkthroughLabels: {
+    label: "Show labels in the summary",
+    description: "Show the walkthrough's labels in the summary comment. This is text in the comment, not native PR/MR labels.",
+  },
+  walkthroughBlastRadius: {
+    label: "Show blast radius in the summary",
+    description:
+      "Show the estimated blast radius in the summary comment. The native label is set separately by Publish blast radius label.",
+  },
   blastRadiusLabel: {
     label: "Publish blast radius label",
     description:
@@ -1083,6 +1092,8 @@ export function ConfigFields(props: {
         <FieldSeparator />
         <Section title="PR summary" description="A summary of what the change does, and labels from its estimates.">
           <ToggleList>{toggles(["walkthrough"])}</ToggleList>
+          {/* Text in the walkthrough itself, unlike the native labels below. */}
+          <ToggleList>{toggles(["walkthroughLabels", "walkthroughBlastRadius"], !walkthroughOn)}</ToggleList>
           {/* Labels come from the summary's estimates, so they need one. */}
           <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !walkthroughOn)}</ToggleList>
         </Section>

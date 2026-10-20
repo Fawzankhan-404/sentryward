@@ -140,6 +140,24 @@ describe("review stats line", () => {
   });
 });
 
+describe("walkthrough meta line", () => {
+  it("shows the labels and blast radius by default and leaves each out on its own", async () => {
+    const result = await sampleResult();
+    expect(toMarkdown(result)).toContain("🏷️ Labels: `feature` · ⏱️ Review effort: 1/5 · 💥 Blast radius: small");
+    expect(toMarkdown(result, { labels: false })).toContain("\n⏱️ Review effort: 1/5 · 💥 Blast radius: small\n");
+    expect(toMarkdown(result, { blastRadius: false })).toContain("\n🏷️ Labels: `feature` · ⏱️ Review effort: 1/5\n");
+    expect(walkthroughMarkdown(result, { labels: false, blastRadius: false })).toContain("\n⏱️ Review effort: 1/5\n");
+  });
+
+  it("is left out with every segment off, keeping the rest of the walkthrough", async () => {
+    const result = await sampleResult();
+    const without = toMarkdown(result, { labels: false, blastRadius: false, effort: false });
+    expect(without).not.toMatch(/Labels:|Review effort:|Blast radius:/);
+    expect(without).not.toMatch(/\n\n\n/);
+    expect(without).toMatch(/^## Summary\n\nAdds b and c\./);
+  });
+});
+
 describe("finding counts line", () => {
   it("is on by default and can be left out, keeping the verdict and sections", async () => {
     const result = await sampleResult();

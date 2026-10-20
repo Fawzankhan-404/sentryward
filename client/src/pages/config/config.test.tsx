@@ -55,6 +55,8 @@ const effective = {
     highLevelSummary: true,
     highLevelSummaryPlacement: "description",
     highLevelSummaryInstructions: "",
+    walkthroughLabels: true,
+    walkthroughBlastRadius: true,
   },
   triggers: {
     review: "published",
@@ -402,6 +404,8 @@ describe("Configuration page", () => {
     await userEvent.click(screen.getByRole("switch", { name: "Show finding counts" }))
     await userEvent.click(screen.getByRole("switch", { name: "Show review details" }))
     await userEvent.click(screen.getByRole("switch", { name: "Prompt for AI agents per comment" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Show labels in the summary" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Show blast radius in the summary" }))
     await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
     await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
     await selectConnectionOnLlmTab()
@@ -411,7 +415,15 @@ describe("Configuration page", () => {
       expect(body).toEqual({
         settings: {
           llm: { connection: "openai" },
-          output: { findingCounts: false, reviewStats: false, agentPrompts: false, blastRadiusLabel: true, effortLabel: true },
+          output: {
+            findingCounts: false,
+            reviewStats: false,
+            agentPrompts: false,
+            blastRadiusLabel: true,
+            effortLabel: true,
+            walkthroughLabels: false,
+            walkthroughBlastRadius: false,
+          },
           triggers: {
             review: "all",
             reviewOnPush: false,
