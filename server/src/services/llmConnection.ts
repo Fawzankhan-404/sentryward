@@ -1,5 +1,8 @@
+import { APICallError } from "ai";
+import { z } from "zod";
 import { HttpError } from "../lib/httpError.ts";
-import type { ProviderName } from "../review/llm/providers.ts";
+import { excerpt } from "../review/llm/format.ts";
+import { createGenerate, type Endpoint, type Generate, type ProviderName } from "../review/llm/providers.ts";
 
 export type LlmConnectionStatus = "active" | "revoked" | "unreachable";
 
@@ -138,4 +141,67 @@ export async function listLlmModels(provider: ProviderName, apiKey?: string, cus
   const body = await fetchModelList(provider, apiKey, customBaseUrl, true);
   const ids = modelIds(provider, body, customBaseUrl).map((id) => `${provider}/${id}`);
   return [...new Set(ids)].sort();
+}
+
+export type ModelTestResult =
+  | { ok: true; latencyMs: number; inputTokens: number; outputTokens: number }
+  | { ok: false; reason: "revoked" | "model" | "unreachable" | "output"; message: string };
+
+// Provider error bodies can be long (HTML error pages from proxies included).
+function providerMessage(err: unknown) {
+  return excerpt(err instanceof Error ? err.message : String(err), 300);
+}
+
+function testFailure(err: unknown): ModelTestResult {
+  if (APICallError.isInstance(err) && err.statusCode !== undefined) {
+    if (err.statusCode === 401 || err.statusCode === 403) {
+      return { ok: false, reason: "revoked", message: "The API host rejected this key" };
+    }
+    if (err.statusCode === 404) {
+      return { ok: false, reason: "model", message: `The API host does not serve this model: ${providerMessage(err)}` };
+    }
+    return { ok: false, reason: "unreachable", message: `The API host returned ${err.statusCode}: ${providerMessage(err)}` };
+  }
+  // createGenerate's own wording for a reply that did not parse.
+  if (err instanceof Error && err.message.startsWith("No object generated")) {
+    return { ok: false, reason: "output", message: "The model answered, but not in the JSON format reviews need" };
+  }
+  if (APICallError.isInstance(err)) {
+    return { ok: false, reason: "unreachable", message: "Could not reach this API host" };
+  }
+  return { ok: false, reason: "unreachable", message: providerMessage(err) };
+}
+
+// One real generation through the same Generate a review would build for this
+// connection (see runJob), so a pass here means the model can review. It
+// spends provider quota, hence the tiny prompt.
+export async function testLlmModel(
+  provider: ProviderName,
+  model: string,
+  credential: { apiKey?: string; baseUrl?: string },
+  generateFor: (keys: Partial<Record<ProviderName, string>>, endpoint?: Endpoint) => Generate = createGenerate,
+): Promise<ModelTestResult> {
+  const endpoint = credential.baseUrl ? { baseUrl: credential.baseUrl, apiKey: credential.apiKey } : undefined;
+  const keys = credential.apiKey ? { [provider]: credential.apiKey } : {};
+  try {
+    const response = await generateFor(keys, endpoint)({
+      model,
+      system: "You are checking that this model is reachable.",
+      prompt: "Reply with ok set to true.",
+      schema: z.object({ ok: z.boolean() }),
+      schemaName: "connection_test",
+      temperature: 0,
+      // Reasoning models spend output tokens before answering, so a tighter
+      // cap would fail models that review fine.
+      maxOutputTokens: 256,
+    });
+    return {
+      ok: true,
+      latencyMs: response.latencyMs,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+    };
+  } catch (err) {
+    return testFailure(err);
+  }
 }

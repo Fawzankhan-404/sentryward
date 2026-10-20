@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { CircleCheck, CircleX, FlaskConical, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { z } from "zod"
 import { SearchableSelect } from "@/components/SearchableSelect"
@@ -39,18 +39,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { TextField } from "@/features/auth/TextField"
 import { applyServerErrors } from "@/features/auth/applyServerErrors"
+import { ModelCombobox } from "@/features/config/ModelCombobox"
+import { ApiError } from "@/lib/api"
 import {
   useApiKeys,
   useApiKeyStatuses,
   useDeleteApiKey,
+  useLlmModels,
   useSaveApiKey,
+  useTestLlmModel,
   STATUS_LABELS,
   type ApiKey,
   type LlmConnectionStatus,
@@ -273,7 +277,17 @@ function compareKeys(
   }
 }
 
-function KeyActions({ apiKey, onReplace, onRemove }: { apiKey: ApiKey; onReplace: () => void; onRemove: () => void }) {
+function KeyActions({
+  apiKey,
+  onTest,
+  onReplace,
+  onRemove,
+}: {
+  apiKey: ApiKey
+  onTest: () => void
+  onReplace: () => void
+  onRemove: () => void
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -288,6 +302,11 @@ function KeyActions({ apiKey, onReplace, onRemove }: { apiKey: ApiKey; onReplace
       </DropdownMenuTrigger>
       {/* The shared menu matches its trigger's width, which is far too narrow for an icon button. */}
       <DropdownMenuContent align="end" className="w-max whitespace-nowrap">
+        {/* An unreadable key has nothing to send the provider. */}
+        <DropdownMenuItem onSelect={onTest} disabled={apiKey.undecryptable}>
+          <FlaskConical />
+          Test model
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={onReplace}>
           <RefreshCw />
           Replace
@@ -348,6 +367,96 @@ function RemoveKeyDialog({ apiKey, onOpenChange }: { apiKey: ApiKey | null; onOp
   )
 }
 
+function TestModelForm({ apiKey }: { apiKey: ApiKey }) {
+  const [model, setModel] = useState("")
+  const models = useLlmModels(apiKey.provider)
+  const test = useTestLlmModel()
+  const modelError = test.error instanceof ApiError ? test.error.fieldErrors?.model?.[0] : undefined
+  const result = test.data?.result
+
+  function onModelChange(value: string) {
+    setModel(value)
+    // A result describes the model it ran, not the one now typed.
+    test.reset()
+  }
+
+  return (
+    <form
+      noValidate
+      className="flex flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        test.mutate({ provider: apiKey.provider, model: model.trim() })
+      }}
+    >
+      <Field data-invalid={modelError ? true : undefined}>
+        <FieldLabel htmlFor="test-model">Model</FieldLabel>
+        <ModelCombobox
+          id="test-model"
+          aria-label="Model"
+          value={model}
+          onChange={onModelChange}
+          placeholder={`${apiKey.provider}/...`}
+          aria-invalid={modelError ? true : undefined}
+          suggestions={{ models: models.data?.models ?? [], loading: models.isPending, error: models.isError }}
+        />
+        <FieldDescription>Sends one short request, which uses a little of this connection's quota.</FieldDescription>
+        {modelError && <FieldError>{modelError}</FieldError>}
+      </Field>
+      {result?.ok && (
+        <p role="status" className="flex items-center gap-2 text-sm">
+          <CircleCheck className="size-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+          Responded in {result.latencyMs} ms, {result.inputTokens} input / {result.outputTokens} output tokens
+        </p>
+      )}
+      {result && !result.ok && (
+        <p role="alert" className="flex items-start gap-2 text-sm text-destructive">
+          <CircleX className="mt-0.5 size-4 shrink-0" />
+          {result.message}
+        </p>
+      )}
+      {test.isError && !modelError && (
+        <p role="alert" className="text-sm text-destructive">
+          {test.error instanceof ApiError ? test.error.message : "Could not run the test"}
+        </p>
+      )}
+      <DialogFooter>
+        <DialogClose asChild>
+          <Button type="button" variant="outline">
+            Close
+          </Button>
+        </DialogClose>
+        <Button type="submit" disabled={!model.trim() || test.isPending}>
+          {test.isPending && <Loader2 className="animate-spin" />}
+          {test.isPending ? "Testing..." : "Run test"}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
+
+// Beside the table for the same reason as RemoveKeyDialog. The form is keyed
+// by provider so reopening starts without the last model or result.
+function TestModelDialog({ apiKey, onOpenChange }: { apiKey: ApiKey | null; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={apiKey !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        {apiKey && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Test a {LLM_PROVIDERS[apiKey.provider].label} model</DialogTitle>
+              <DialogDescription>
+                Runs one real generation with this connection, the way a review would.
+              </DialogDescription>
+            </DialogHeader>
+            <TestModelForm key={apiKey.provider} apiKey={apiKey} />
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function KeysTable({
   keys,
   statuses,
@@ -360,6 +469,7 @@ function KeysTable({
   // Unsorted keeps the API order (the provider list order).
   const { sort, onSort } = useSort<SortKey>()
   const [removing, setRemoving] = useState<ApiKey | null>(null)
+  const [testing, setTesting] = useState<ApiKey | null>(null)
 
   const sorted = useMemo(() => {
     if (!sort) return keys
@@ -424,7 +534,12 @@ function KeysTable({
                   {formatDate(key.updatedAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  <KeyActions apiKey={key} onReplace={() => onReplace(key.provider)} onRemove={() => setRemoving(key)} />
+                  <KeyActions
+                    apiKey={key}
+                    onTest={() => setTesting(key)}
+                    onReplace={() => onReplace(key.provider)}
+                    onRemove={() => setRemoving(key)}
+                  />
                 </TableCell>
               </TableRow>
             )
@@ -439,6 +554,7 @@ function KeysTable({
         onSizeChange={pagination.setSize}
       />
       <RemoveKeyDialog apiKey={removing} onOpenChange={(open) => !open && setRemoving(null)} />
+      <TestModelDialog apiKey={testing} onOpenChange={(open) => !open && setTesting(null)} />
     </>
   )
 }

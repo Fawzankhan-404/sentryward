@@ -4,11 +4,12 @@ import { DecryptError, decrypt, encrypt } from "../lib/crypto.ts";
 import { HttpError } from "../lib/httpError.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { prisma } from "../lib/prisma.ts";
-import { PROVIDERS, type ProviderName } from "../review/llm/providers.ts";
+import { PROVIDERS, providerOf, type ProviderName } from "../review/llm/providers.ts";
 import {
   LlmConnectionError,
   listLlmModels,
   normalizeBaseUrl,
+  testLlmModel,
   verifyLlmConnection,
   type LlmConnectionStatus,
 } from "../services/llmConnection.ts";
@@ -17,6 +18,7 @@ import {
   changePasswordSchema,
   deleteAccountSchema,
   saveApiKeySchema,
+  testModelSchema,
   updateProfileSchema,
 } from "../schemas/settings.schema.ts";
 import { assertAnotherAdminRemains } from "../services/admins.ts";
@@ -153,6 +155,36 @@ export async function apiKeyModels(req: Request, res: Response) {
 
   const models = await listLlmModels(provider, storedApiKey(credential), credential.baseUrl ?? undefined);
   res.json({ models });
+}
+
+// Runs one minimal generation with the stored credential; the outcome, failed
+// or not, is the answer, so provider errors come back as a 200 result.
+export async function testApiKeyModel(req: Request, res: Response) {
+  const { provider } = apiKeyParamsSchema.parse(req.params);
+  const { model } = testModelSchema.parse(req.body);
+  const credential = await prisma.llmCredential.findUnique({
+    where: { workspaceId_provider: { workspaceId: req.workspaceId!, provider } },
+  });
+  if (!credential) {
+    throw new HttpError(404, "No key stored for this provider");
+  }
+
+  let modelProvider: ProviderName;
+  try {
+    modelProvider = providerOf(model);
+  } catch {
+    throw new HttpError(400, "Validation failed", { model: [`Use provider/model, e.g. ${provider}/<model id>`] });
+  }
+  // Same rule the worker applies: an official API only runs its own models.
+  if (!credential.baseUrl && modelProvider !== provider) {
+    throw new HttpError(400, "Validation failed", { model: [`This connection can only run ${provider}/... models`] });
+  }
+
+  const result = await testLlmModel(provider, model, {
+    apiKey: storedApiKey(credential),
+    baseUrl: credential.baseUrl ?? undefined,
+  });
+  res.json({ result });
 }
 
 export async function saveApiKey(req: Request, res: Response) {

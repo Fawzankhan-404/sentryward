@@ -10,6 +10,12 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- A "Test model" action on each LLM connection runs one minimal generation
+  against a chosen model with the stored credential, through the same path a
+  review uses, and reports the response time and token usage or why it failed
+  (rejected key, model not served, host unreachable, or a reply reviews cannot
+  parse). The secret stays on the server. Backed by
+  `POST /api/settings/api-keys/:provider/test`.
 - `output.walkthrough_labels` and `output.walkthrough_blast_radius` (on by
   default, "Show labels in the summary" and "Show blast radius in the summary"
   on the Display tab) hide the labels and blast radius segments of the
