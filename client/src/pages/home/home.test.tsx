@@ -37,7 +37,7 @@ const globalConfig = (review: string) => ({
   config: { profile: "balanced", review: { blockOn: "major" }, triggers: { review } },
 })
 
-const apiKey = { provider: "anthropic", stored: true, last4: "abcd", baseUrl: null, updatedAt: null, serverDefault: false }
+const apiKey = { provider: "anthropic", stored: true, last4: "abcd", undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false }
 
 // Defaults to a fully set up account with automatic reviews on.
 function stubHome({

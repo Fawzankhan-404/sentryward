@@ -1,4 +1,3 @@
-import { decrypt } from "../../lib/crypto.ts";
 import { HttpError } from "../../lib/httpError.ts";
 import { parseJson, REVIEW_COMMAND, safeEqual } from "../../lib/webhook.ts";
 import type { ForgeConnection } from "../../generated/prisma/client.ts";
@@ -6,6 +5,7 @@ import { GitLabAdapter } from "../../review/forge/gitlab.ts";
 import { gitlabConnectSchema } from "../../schemas/connections.schema.ts";
 import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import type { ProviderDefinition } from "./types.ts";
+import { decryptToken } from "./token.ts";
 
 const DEVELOPER = 30;
 
@@ -31,7 +31,7 @@ function adapterFor(connection: ForgeConnection): GitLabAdapter {
   }
   return new GitLabAdapter({
     host: connection.host,
-    token: async () => decrypt(encryptedToken),
+    token: async () => decryptToken(encryptedToken, "GitLab"),
     selfLogin: connection.accountLogin,
   });
 }

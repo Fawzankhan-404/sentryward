@@ -7,10 +7,10 @@ import { mockApi } from "@/test/apiRoutes"
 
 const noKeys = {
   keys: [
-    { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
-    { provider: "openai", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
-    { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
-    { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+    { provider: "anthropic", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
+    { provider: "openai", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: true },
+    { provider: "google", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
+    { provider: "ollama", stored: false, last4: null, undecryptable: false, baseUrl: null, updatedAt: null, serverDefault: false },
   ],
 }
 
@@ -18,6 +18,7 @@ const storedAnthropic = {
   provider: "anthropic",
   stored: true,
   last4: "1234",
+  undecryptable: false,
   baseUrl: null,
   updatedAt: "2026-10-01T00:00:00.000Z",
   serverDefault: false,
@@ -101,6 +102,7 @@ describe("LLM Connections page", () => {
       provider: "ollama",
       stored: true,
       last4: null,
+      undecryptable: false,
       baseUrl: "http://host.docker.internal:11434/v1",
       updatedAt: "2026-10-04T00:00:00.000Z",
       serverDefault: false,
@@ -193,6 +195,33 @@ describe("LLM Connections page", () => {
     )
   })
 
+  it("lists a key the server can no longer decrypt so it can be replaced or removed", async () => {
+    const unreadable = { ...storedAnthropic, last4: null, undecryptable: true }
+    const fetchSpy = mockApi({
+      "GET /api/settings/api-keys": { keys: [unreadable, ...noKeys.keys.slice(1)] },
+      "DELETE /api/settings/api-keys/anthropic": () => jsonResponse(204),
+    })
+    renderWithProviders(<App />, { route: "/llm-connections" })
+
+    const row = await screen.findByRole("row", { name: /Anthropic/ })
+    expect(within(row).getByText("Unreadable")).toBeInTheDocument()
+    expect(within(row).getByText("Re-enter key")).toBeInTheDocument()
+    expect(calls(fetchSpy, "GET", "/api/settings/api-keys/anthropic/status")).toHaveLength(0)
+
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for Anthropic" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Replace" }))
+    const sheet = await screen.findByRole("dialog")
+    expect(within(sheet).getByText(/The stored key can't be decrypted/)).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+
+    await userEvent.click(within(row).getByRole("button", { name: "Actions for Anthropic" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove connection" }))
+
+    await waitFor(() => expect(calls(fetchSpy, "DELETE", "/api/settings/api-keys/anthropic")).toHaveLength(1))
+  })
+
   it("removes a stored key after confirming", async () => {
     const fetchSpy = mockApi({
       "GET /api/settings/api-keys": { keys: [storedAnthropic, ...noKeys.keys.slice(1)] },
@@ -215,6 +244,7 @@ describe("LLM Connections page", () => {
       provider: "ollama",
       stored: true,
       last4: null,
+      undecryptable: false,
       baseUrl: "http://ollama.internal:11434/v1",
       updatedAt: "2026-10-02T00:00:00.000Z",
       serverDefault: false,

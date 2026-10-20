@@ -5,6 +5,7 @@ import { app } from "../src/app.ts";
 import { encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
+import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
 import { createUser } from "./helpers/users.ts";
 
 const SECRET = "webhook-secret";
@@ -280,6 +281,20 @@ describe("POST /api/webhooks/github/:repoId", () => {
     expect((await sendRepo(repo.id, "pull_request", repoPrEvent("opened"), "nope")).status).toBe(401);
     expect((await sendRepo("00000000-0000-4000-8000-000000000000", "pull_request", repoPrEvent("opened"))).status).toBe(401);
     expect(await prisma.reviewJob.count()).toBe(0);
+  });
+
+  it("rejects a hook whose stored secret can no longer be decrypted", async () => {
+    const repo = await githubTokenRepo();
+    await prisma.repository.update({
+      where: { id: repo.id },
+      data: { encryptedWebhookSecret: encryptWithOtherKey("gh-repo-secret") },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect((await sendRepo(repo.id, "pull_request", repoPrEvent("opened"))).status).toBe(401);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("acme/api"));
+    expect(await prisma.reviewJob.count()).toBe(0);
+    warn.mockRestore();
   });
 
   it("answers the ping GitHub sends when the hook is created", async () => {

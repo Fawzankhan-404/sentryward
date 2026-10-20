@@ -5,6 +5,7 @@ import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { hashPassword } from "../src/lib/password.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { apiKeysFor, llmCredentialsFor } from "../src/services/llm.ts";
+import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
 import { createUser } from "./helpers/users.ts";
 
 const PASSWORD = "correct-horse";
@@ -249,6 +250,52 @@ describe("/api/settings/api-keys", () => {
     const res = await request(app).delete("/api/settings/api-keys/anthropic").set("Cookie", cookie);
     expect(res.status).toBe(404);
     expect(await prisma.llmCredential.count({ where: { workspaceId: other.workspace.id } })).toBe(1);
+  });
+});
+
+describe("a key saved under another ENCRYPTION_KEY", () => {
+  beforeEach(async () => {
+    await prisma.llmCredential.create({
+      data: { workspaceId, provider: "anthropic", encryptedKey: encryptWithOtherKey("sk-ant-old-1234") },
+    });
+    await prisma.llmCredential.create({
+      data: { workspaceId, provider: "openai", encryptedKey: encrypt("sk-openai-5678") },
+    });
+  });
+
+  it("is listed as unreadable without failing the other keys", async () => {
+    const res = await request(app).get("/api/settings/api-keys").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    const byProvider = Object.fromEntries(res.body.keys.map((key: { provider: string }) => [key.provider, key]));
+    expect(byProvider.anthropic).toMatchObject({ stored: true, last4: null, undecryptable: true });
+    expect(byProvider.openai).toMatchObject({ stored: true, last4: "5678", undecryptable: false });
+  });
+
+  it("answers status and model requests with a 409", async () => {
+    for (const path of ["status", "models"]) {
+      const res = await request(app).get(`/api/settings/api-keys/anthropic/${path}`).set("Cookie", cookie);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/can't be decrypted/);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("can be replaced or removed", async () => {
+    const replaced = await request(app)
+      .put("/api/settings/api-keys/anthropic")
+      .set("Cookie", cookie)
+      .send({ apiKey: "sk-ant-new-9999" });
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.key).toMatchObject({ last4: "9999", undecryptable: false });
+
+    expect((await request(app).delete("/api/settings/api-keys/anthropic").set("Cookie", cookie)).status).toBe(204);
+  });
+
+  it("fails a review's credential lookup with a readable message", async () => {
+    await expect(llmCredentialsFor(workspaceId)).rejects.toThrow(
+      "The stored anthropic API key can't be decrypted; re-enter it in Settings > API keys",
+    );
   });
 });
 

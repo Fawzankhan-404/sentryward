@@ -11,6 +11,7 @@ import { hostOrigin } from "../review/forge/types.ts";
 import { loadWorkspaceConnection } from "../services/forge.ts";
 import { getGitHubApp, githubInstallUrl } from "../services/githubApp.ts";
 import { isForgeProvider, PROVIDERS, providerFor } from "../services/providers/index.ts";
+import { UnreadableTokenError } from "../services/providers/token.ts";
 import { removeWebhook } from "../services/webhooks.ts";
 import { loadMembership, requireRole } from "../services/workspaces.ts";
 import { githubCallbackSchema, githubInstallSchema } from "../schemas/connections.schema.ts";
@@ -99,6 +100,7 @@ export async function getConnection(req: Request, res: Response) {
 
 // Asks the forge whether the stored credentials still work. Always 200: a
 // refused or unreachable forge is the answer, not a failure of this request.
+// A token this server can no longer decrypt needs reconnecting, like a revoked one.
 export async function connectionStatus(req: Request, res: Response) {
   const connection = await loadWorkspaceConnection(req.workspaceId!, String(req.params.id));
   let status: "active" | "revoked" | "unreachable";
@@ -106,7 +108,8 @@ export async function connectionStatus(req: Request, res: Response) {
     await providerFor(connection.provider).checkCredentials(connection);
     status = "active";
   } catch (err) {
-    const refused = err instanceof ForgeError && [401, 403, 404].includes(err.status);
+    const refused =
+      err instanceof UnreadableTokenError || (err instanceof ForgeError && [401, 403, 404].includes(err.status));
     status = refused ? "revoked" : "unreachable";
   }
   res.json({ status });

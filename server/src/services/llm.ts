@@ -1,5 +1,5 @@
 import { env } from "../config/env.ts";
-import { decrypt } from "../lib/crypto.ts";
+import { DecryptError, decrypt } from "../lib/crypto.ts";
 import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
 import {
@@ -37,6 +37,19 @@ export async function requireStoredLlmConnection(workspaceId: string, provider: 
   }
 }
 
+// The job's error is what the user reads, so a key saved under another
+// ENCRYPTION_KEY says what to do instead of surfacing the GCM failure.
+function decryptStoredKey(provider: ProviderName, encryptedKey: string): string {
+  try {
+    return decrypt(encryptedKey);
+  } catch (error) {
+    if (error instanceof DecryptError) {
+      throw new Error(`The stored ${provider} API key can't be decrypted; re-enter it in Settings > API keys`);
+    }
+    throw error;
+  }
+}
+
 export async function llmCredentialsFor(
   workspaceId: string,
 ): Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }> {
@@ -47,7 +60,7 @@ export async function llmCredentialsFor(
   for (const credential of stored) {
     if (PROVIDERS.includes(credential.provider as ProviderName)) {
       const provider = credential.provider as ProviderName;
-      const apiKey = credential.encryptedKey ? decrypt(credential.encryptedKey) : undefined;
+      const apiKey = credential.encryptedKey ? decryptStoredKey(provider, credential.encryptedKey) : undefined;
       const baseUrl = credential.baseUrl ?? undefined;
       if (apiKey) keys[provider] = apiKey;
       if (baseUrl) baseUrls[provider] = baseUrl;

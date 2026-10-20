@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decrypt, encrypt } from "../src/lib/crypto.ts";
+import { DecryptError, decrypt, encrypt } from "../src/lib/crypto.ts";
+import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
 
 describe("encrypt/decrypt", () => {
   it("round-trips and never stores the plaintext", () => {
@@ -24,5 +25,9 @@ describe("encrypt/decrypt", () => {
 
   it("rejects an unknown format", () => {
     expect(() => decrypt("plaintext")).toThrow(/Unrecognised/);
+  });
+
+  it("rejects a payload sealed with another key as a DecryptError", () => {
+    expect(() => decrypt(encryptWithOtherKey("secret"))).toThrow(DecryptError);
   });
 });

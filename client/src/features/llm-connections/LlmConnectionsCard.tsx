@@ -215,9 +215,11 @@ function AddConnectionSheet({
                 ? `Create a key at ${LLM_PROVIDERS[providerId].keyUrl}.`
                 : "Connect to an Ollama server that exposes its OpenAI-compatible API."}
               {credential.stored
-                ? credential.last4
-                  ? ` A key ending in ${credential.last4} is stored. Saving replaces it.`
-                  : " A host without an API key is stored."
+                ? credential.undecryptable
+                  ? " The stored key can't be decrypted (the server's encryption key changed). Saving replaces it."
+                  : credential.last4
+                    ? ` A key ending in ${credential.last4} is stored. Saving replaces it.`
+                    : " A host without an API key is stored."
                 : credential.serverDefault
                   ? " Reviews currently use the server's key."
                   : ""}
@@ -253,14 +255,19 @@ function compareKeys(
   key: SortKey,
   statuses: KeyStatuses,
 ) {
-  const rank = (status: LlmConnectionStatus | undefined) => (status ? STATUS_RANK[status] : 3)
+  // An unreadable key is the most urgent problem, ahead of a revoked one.
+  const rank = (apiKey: ApiKey) => {
+    if (apiKey.undecryptable) return -1
+    const status = statuses[apiKey.provider]
+    return status ? STATUS_RANK[status] : 3
+  }
   switch (key) {
     case "provider":
       return LLM_PROVIDERS[a.provider].label.localeCompare(LLM_PROVIDERS[b.provider].label)
     case "host":
       return (a.baseUrl ?? "").localeCompare(b.baseUrl ?? "")
     case "status":
-      return rank(statuses[a.provider]) - rank(statuses[b.provider])
+      return rank(a) - rank(b)
     case "updatedAt":
       return Date.parse(a.updatedAt ?? "") - Date.parse(b.updatedAt ?? "")
   }
@@ -393,11 +400,22 @@ function KeysTable({
                   </Badge>
                 </TableCell>
                 <TableCell className="font-mono text-muted-foreground">
-                  {key.last4 ? `••••${key.last4}` : "None"}
+                  {key.undecryptable ? "Unreadable" : key.last4 ? `••••${key.last4}` : "None"}
                 </TableCell>
                 <TableCell className="break-all text-muted-foreground">{key.baseUrl ?? "Default"}</TableCell>
                 <TableCell>
-                  <ApiKeyStatusBadge status={statuses[key.provider]} />
+                  {key.undecryptable ? (
+                    <Badge
+                      variant="outline"
+                      className="border-destructive/40 text-destructive"
+                      title="The server's encryption key changed, so this key can't be read; replace it"
+                    >
+                      <span className="size-1.5 rounded-full bg-current" aria-hidden />
+                      Re-enter key
+                    </Badge>
+                  ) : (
+                    <ApiKeyStatusBadge status={statuses[key.provider]} />
+                  )}
                 </TableCell>
                 <TableCell
                   className="text-muted-foreground"
@@ -436,7 +454,8 @@ function ConnectedKeys({
   addButton: ReactNode
   onReplace: (provider: LlmProvider) => void
 }) {
-  const statuses = useApiKeyStatuses(keys)
+  // An unreadable key has nothing to send the provider, so it is not checked.
+  const statuses = useApiKeyStatuses(keys.filter((key) => !key.undecryptable))
   const { setPage } = usePagination()
   const [query, setQuery] = useState("")
   const [provider, setProvider] = useState(ALL)

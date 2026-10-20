@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { env } from "../config/env.ts";
-import { decrypt, encrypt } from "../lib/crypto.ts";
+import { DecryptError, decrypt, encrypt } from "../lib/crypto.ts";
 import { HttpError } from "../lib/httpError.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { prisma } from "../lib/prisma.ts";
@@ -43,14 +43,27 @@ async function requirePassword(userId: string, password: string, field: string) 
 }
 
 // Only the last four characters ever leave the server, so the user can tell keys apart.
+// A key written under another ENCRYPTION_KEY is still listed, flagged, so it
+// can be replaced or removed rather than failing the whole list.
 function publicKey(
   provider: ProviderName,
   stored?: { encryptedKey: string | null; baseUrl: string | null; updatedAt: Date },
 ) {
+  let last4: string | null = null;
+  let undecryptable = false;
+  if (stored?.encryptedKey) {
+    try {
+      last4 = decrypt(stored.encryptedKey).slice(-4);
+    } catch (error) {
+      if (!(error instanceof DecryptError)) throw error;
+      undecryptable = true;
+    }
+  }
   return {
     provider,
     stored: Boolean(stored),
-    last4: stored?.encryptedKey ? decrypt(stored.encryptedKey).slice(-4) : null,
+    last4,
+    undecryptable,
     baseUrl: stored?.baseUrl ?? null,
     updatedAt: stored?.updatedAt ?? null,
     serverDefault: SERVER_KEYS[provider],
@@ -86,6 +99,19 @@ export async function changePassword(req: Request, res: Response) {
   res.status(204).end();
 }
 
+// A conflict rather than a 500: the row exists, but only re-entering it helps.
+function storedApiKey(credential: { encryptedKey: string | null }): string | undefined {
+  if (!credential.encryptedKey) return undefined;
+  try {
+    return decrypt(credential.encryptedKey);
+  } catch (error) {
+    if (error instanceof DecryptError) {
+      throw new HttpError(409, "The stored key can't be decrypted; re-enter it");
+    }
+    throw error;
+  }
+}
+
 export async function listApiKeys(req: Request, res: Response) {
   const stored = await prisma.llmCredential.findMany({ where: { workspaceId: req.workspaceId } });
   const byProvider = new Map(stored.map((credential) => [credential.provider, credential]));
@@ -103,13 +129,10 @@ export async function apiKeyStatus(req: Request, res: Response) {
     throw new HttpError(404, "No key stored for this provider");
   }
 
+  const apiKey = storedApiKey(credential);
   let status: LlmConnectionStatus;
   try {
-    await verifyLlmConnection(
-      provider,
-      credential.encryptedKey ? decrypt(credential.encryptedKey) : undefined,
-      credential.baseUrl ?? undefined,
-    );
+    await verifyLlmConnection(provider, apiKey, credential.baseUrl ?? undefined);
     status = "active";
   } catch (error) {
     status = error instanceof LlmConnectionError && error.connectionStatus === "revoked" ? "revoked" : "unreachable";
@@ -128,11 +151,7 @@ export async function apiKeyModels(req: Request, res: Response) {
     throw new HttpError(404, "No key stored for this provider");
   }
 
-  const models = await listLlmModels(
-    provider,
-    credential.encryptedKey ? decrypt(credential.encryptedKey) : undefined,
-    credential.baseUrl ?? undefined,
-  );
+  const models = await listLlmModels(provider, storedApiKey(credential), credential.baseUrl ?? undefined);
   res.json({ models });
 }
 

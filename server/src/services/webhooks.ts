@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { env } from "../config/env.ts";
-import { decrypt, encrypt } from "../lib/crypto.ts";
+import { DecryptError, decrypt, encrypt } from "../lib/crypto.ts";
 import { prisma } from "../lib/prisma.ts";
 import type { ForgeConnection, Repository } from "../generated/prisma/client.ts";
 import { forgeName } from "../review/forge/providers.ts";
@@ -50,6 +50,15 @@ export async function removeWebhook(repo: Repository, connection: ForgeConnectio
   });
 }
 
+// A secret saved under another ENCRYPTION_KEY verifies nothing, so the hook
+// gets the usual 401; re-enabling the repository registers a fresh one.
 export function webhookSecret(repo: Repository): string | null {
-  return repo.encryptedWebhookSecret ? decrypt(repo.encryptedWebhookSecret) : null;
+  if (!repo.encryptedWebhookSecret) return null;
+  try {
+    return decrypt(repo.encryptedWebhookSecret);
+  } catch (error) {
+    if (!(error instanceof DecryptError)) throw error;
+    console.warn(`Webhook secret for ${repo.fullPath} cannot be decrypted; re-enable the repository to replace it`);
+    return null;
+  }
 }
