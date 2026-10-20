@@ -17,19 +17,43 @@ const request = (model: string) => ({
   maxOutputTokens: 100,
 });
 
-const chatCompletion = (content: string) => ({
-  id: "chatcmpl-1",
-  object: "chat.completion",
-  created: 0,
-  model: "cx/gpt-5.6-sol(medium)",
-  choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-  usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
+// An OpenAI streaming (SSE) body: the engine now streams the proxied path, so
+// the stub must speak `text/event-stream`. Each chunk is JSON-stringified onto
+// one `data:` line, so prose/fence payloads with newlines never break framing.
+const chatCompletionChunk = (extra: Record<string, unknown>) =>
+  JSON.stringify({
+    id: "chatcmpl-1",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "cx/gpt-5.6-sol(medium)",
+    ...extra,
+  });
+
+const sse = (content: string) =>
+  [
+    `data: ${chatCompletionChunk({
+      choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }],
+    })}`,
+    `data: ${chatCompletionChunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}`,
+    `data: ${chatCompletionChunk({
+      choices: [],
+      usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
+    })}`,
+    "data: [DONE]",
+    "",
+  ].join("\n\n");
+
+const streamRoute = (url: RegExp, content: string) => ({
+  method: "POST",
+  url,
+  body: sse(content),
+  headers: { "content-type": "text/event-stream" },
 });
 
 describe("createGenerate with an endpoint", () => {
   it("sends OpenAI models to its chat completions with the chosen key and the router id", async () => {
     const { fetch, calls } = fetchStub([
-      { method: "POST", url: /^http:\/\/router\.test\/v1\/chat\/completions$/, body: chatCompletion('{"ok":true}') },
+      streamRoute(/^http:\/\/router\.test\/v1\/chat\/completions$/, '{"ok":true}'),
     ]);
     vi.stubGlobal("fetch", fetch);
 
@@ -58,7 +82,7 @@ describe("createGenerate with an endpoint", () => {
 
   it("uses an Ollama credential host through chat completions without a key", async () => {
     const { fetch, calls } = fetchStub([
-      { method: "POST", url: /^http:\/\/ollama\.test\/v1\/chat\/completions$/, body: chatCompletion('{"ok":true}') },
+      streamRoute(/^http:\/\/ollama\.test\/v1\/chat\/completions$/, '{"ok":true}'),
     ]);
     vi.stubGlobal("fetch", fetch);
 
@@ -78,9 +102,7 @@ const PROSE_REPLY =
 describe("createGenerate behind a proxy", () => {
   const router = () => createGenerate({}, { baseUrl: "http://router.test/v1", apiKey: "router-key" });
   const stubReply = (content: string) => {
-    const stub = fetchStub([
-      { method: "POST", url: /^http:\/\/router\.test\/v1\/chat\/completions$/, body: chatCompletion(content) },
-    ]);
+    const stub = fetchStub([streamRoute(/^http:\/\/router\.test\/v1\/chat\/completions$/, content)]);
     vi.stubGlobal("fetch", stub.fetch);
     return stub;
   };
