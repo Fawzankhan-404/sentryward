@@ -257,11 +257,12 @@ export async function getReviewMarkdown(req: Request, res: Response) {
     throw new HttpError(409, review.result === null ? "This review has no result yet" : "This result can no longer be rendered");
   }
   // Rendered as the summary comment was, so the copy matches the forge. Jobs
-  // stored before output.reviewStats existed showed the stats line; jobs
-  // stored before output.agentPromptAll existed had no prompt.
+  // stored before output.findingCounts or output.reviewStats existed showed
+  // those lines; jobs stored before output.agentPromptAll existed had no prompt.
   const stored = review.resolvedConfig as {
     config?: {
       output?: {
+        findingCounts?: boolean;
         reviewStats?: boolean;
         agentPromptAll?: boolean;
         estimateEffort?: boolean;
@@ -270,11 +271,12 @@ export async function getReviewMarkdown(req: Request, res: Response) {
     };
   } | null;
   const output = stored?.config?.output;
+  const counts = output?.findingCounts !== false;
   const stats = output?.reviewStats !== false;
   const agentPrompt = output?.agentPromptAll === true;
   res
     .type("text/markdown; charset=utf-8")
-    .send(toMarkdown(result, { stats, agentPrompt, ...walkthroughOptions(output) }));
+    .send(toMarkdown(result, { counts, stats, agentPrompt, ...walkthroughOptions(output) }));
 }
 
 export async function rerunReview(req: Request, res: Response) {

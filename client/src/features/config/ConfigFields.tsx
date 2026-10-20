@@ -100,6 +100,10 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Resolve fixed threads",
     description: "Resolve a finding's inline thread once a later review no longer reports it, and reopen it if it returns.",
   },
+  findingCounts: {
+    label: "Show finding counts",
+    description: "Add a line under the verdict counting the findings by severity and where they are listed.",
+  },
   reviewStats: {
     label: "Show review details",
     description: "Add a line under the summary with the commit, models and how much was reviewed.",
@@ -1068,8 +1072,8 @@ export function ConfigFields(props: {
       <>
         <Section title="Review comments" description="What the review leaves on the change.">
           <ToggleList>{toggles(["postInline", "postSummary", "postCheck"])}</ToggleList>
-          {/* The details line is part of the summary comment. */}
-          <ToggleList>{toggles(["reviewStats"], !postSummaryOn)}</ToggleList>
+          {/* The counts and details lines are part of the summary comment. */}
+          <ToggleList>{toggles(["findingCounts", "reviewStats"], !postSummaryOn)}</ToggleList>
           {/* Each prompt lives in the comment it belongs to. */}
           <ToggleList>{toggles(["agentPrompts"], !postInlineOn)}</ToggleList>
           <ToggleList>{toggles(["agentPromptAll"], !postSummaryOn)}</ToggleList>

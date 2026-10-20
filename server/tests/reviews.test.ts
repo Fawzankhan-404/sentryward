@@ -336,6 +336,19 @@ describe("GET /api/reviews/:id and /markdown", () => {
     expect(res.text).not.toContain("<sub>Reviewed `");
   });
 
+  it("leaves out the finding counts line when the review's config turned it off", async () => {
+    const job = await completedJob();
+    await prisma.reviewJob.update({
+      where: { id: job.id },
+      data: { resolvedConfig: { config: { output: { findingCounts: false } } } },
+    });
+
+    const res = await request(app).get(`/api/reviews/${job.id}/markdown`).set("Cookie", cookie);
+
+    expect(res.text).toBe(toMarkdown(await sampleResult(), { counts: false, agentPrompt: false }));
+    expect(res.text).not.toContain("in the sections below.");
+  });
+
   it("409s for markdown before there is a result", async () => {
     const job = await prisma.reviewJob.create({
       data: { repositoryId: repoId, number: 7, headSha: "h", trigger: "manual" },

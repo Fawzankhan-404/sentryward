@@ -306,17 +306,19 @@ function footer(result: ReviewResult): string {
 // depends only on the result, so re-rendering a stored review reproduces it.
 // The walkthrough, when there is one, opens the document under its heading
 // (walkthroughSection), so one comment carries what the change does and what
-// the review found. `walkthrough: false` leaves it out, and `stats: false` the line
+// the review found. `walkthrough: false` leaves it out, `counts: false` the line
+// counting the findings (output.findingCounts), `stats: false` the line
 // naming the commit, models and coverage (output.reviewStats), and
 // `agentPrompt: false` the one prompt covering every finding
 // (output.agentPromptAll). The rest shape the walkthrough (walkthroughOptions).
 export function toMarkdown(
   result: ReviewResult,
-  options: { walkthrough?: boolean; stats?: boolean; agentPrompt?: boolean } & WalkthroughOptions = {},
+  options: { walkthrough?: boolean; counts?: boolean; stats?: boolean; agentPrompt?: boolean } & WalkthroughOptions = {},
 ): string {
   const walkthrough = options.walkthrough === false ? null : walkthroughSection(result, options);
   const lines = [walkthrough?.heading ?? "## Summary", ...(walkthrough?.lines ?? [])];
-  lines.push("", ...verdictSection(result), "", countsLine(result));
+  lines.push("", ...verdictSection(result));
+  if (options.counts !== false) lines.push("", countsLine(result));
   lines.push(...incrementalNote(result));
   lines.push(...bucketSections(result));
   if (options.agentPrompt !== false && result.findings.length) {

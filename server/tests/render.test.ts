@@ -140,6 +140,19 @@ describe("review stats line", () => {
   });
 });
 
+describe("finding counts line", () => {
+  it("is on by default and can be left out, keeping the verdict and sections", async () => {
+    const result = await sampleResult();
+    expect(toMarkdown(result)).toMatch(/\d+ findings? \(.*\): \d+ actionable, \d+ in the sections below\./);
+    const without = toMarkdown(result, { counts: false });
+    expect(without).not.toMatch(/actionable, \d+ in the sections below\./);
+    expect(without).not.toContain("No findings.");
+    expect(without).not.toMatch(/\n\n\n/);
+    expect(without).toContain("<sub>Reviewed `head` with");
+    expect(without.trimEnd().endsWith(`${BRAND_FOOTER}\n\n${SUMMARY_MARKER}`)).toBe(true);
+  });
+});
+
 describe("agent prompts", () => {
   const ALL = "Prompt for all review comments with AI agents";
 
