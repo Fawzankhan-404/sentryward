@@ -10,6 +10,13 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- The findings page breaks the false-positive rate down by category, severity
+  and model, so it shows where reviews are noisy. Groups with fewer than 5
+  findings are hidden, and groups at 30% or more link to the setting that would
+  quiet them (the reviewed categories, the minimum confidence or severity
+  floor, or the model). The model is the one the last run reporting each
+  finding was configured with. Served as `falsePositivesBy` on
+  `GET /api/findings/stats`.
 - A "Test model" action on each LLM connection runs one minimal generation
   against a chosen model with the stored credential, through the same path a
   review uses, and reports the response time and token usage or why it failed

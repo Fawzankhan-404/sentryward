@@ -41,6 +41,17 @@ const stats: FindingStats = {
   falsePositives: 1,
   found: 9,
   falsePositiveRate: 11,
+  falsePositivesBy: {
+    category: [
+      { key: "security", found: 5, falsePositives: 1, rate: 20 },
+      { key: "bug", found: 4, falsePositives: 0, rate: 0 },
+    ],
+    severity: [
+      { key: "critical", found: 5, falsePositives: 1, rate: 20 },
+      { key: "major", found: 4, falsePositives: 0, rate: 0 },
+    ],
+    model: [{ key: "anthropic/claude-sonnet-5-5", found: 9, falsePositives: 1, rate: 11 }],
+  },
 }
 
 const page = (findings: FindingRow[]) => ({ findings, total: findings.length, page: 1, limit: 10 })
@@ -72,6 +83,49 @@ describe("Findings page", () => {
     expect(within(row).getByText("Security")).toBeInTheDocument()
     expect(within(row).getByText("Potential issue")).toBeInTheDocument()
     expect(within(row).getByText("alice")).toBeInTheDocument()
+  })
+
+  it("breaks false positives down, hiding thin rows and hinting at the noisy ones", async () => {
+    mockApi({
+      "GET /api/findings/stats": {
+        ...stats,
+        falsePositivesBy: {
+          category: [
+            { key: "style", found: 8, falsePositives: 4, rate: 50 },
+            { key: "security", found: 6, falsePositives: 0, rate: 0 },
+            { key: "docs", found: 2, falsePositives: 2, rate: 100 },
+          ],
+          severity: [
+            { key: "major", found: 6, falsePositives: 2, rate: 33 },
+            { key: "minor", found: 10, falsePositives: 4, rate: 40 },
+          ],
+          model: [{ key: null, found: 16, falsePositives: 6, rate: 38 }],
+        },
+      },
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    const byCategory = await screen.findByRole("table", { name: "False positives by category" })
+    const style = within(byCategory).getByText("Style").closest("tr")!
+    expect(within(style).getByText("50%")).toBeInTheDocument()
+    expect(within(style).getByRole("link", { name: "Drop Style from the reviewed categories" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=findings",
+    )
+    expect(within(within(byCategory).getByText("Security").closest("tr")!).queryByRole("link")).toBeNull()
+    // Two findings is too few to call docs noisy, whatever the rate says.
+    expect(within(byCategory).queryByText("Docs")).toBeNull()
+    expect(screen.getByText("1 row with fewer than 5 findings hidden")).toBeInTheDocument()
+
+    // A noisy major gets no settings hint; a noisy minor does.
+    const bySeverity = screen.getByRole("table", { name: "False positives by severity" })
+    expect(within(within(bySeverity).getByText("major").closest("tr")!).queryByRole("link")).toBeNull()
+    expect(within(bySeverity).getByRole("link", { name: "Raise the minimum confidence or severity floor" })).toBeInTheDocument()
+
+    const byModel = screen.getByRole("table", { name: "False positives by model" })
+    expect(within(byModel).getByText("Unknown")).toBeInTheDocument()
+    expect(within(byModel).queryByRole("link")).toBeNull()
   })
 
   it("lists every state once the state filter is removed", async () => {

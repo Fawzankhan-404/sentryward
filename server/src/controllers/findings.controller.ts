@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma.ts";
 import { median } from "../lib/stats.ts";
 import type { Prisma } from "../generated/prisma/client.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
-import { SEVERITIES } from "../review/core/severity.ts";
+import { CATEGORIES, SEVERITIES, type Category } from "../review/core/severity.ts";
 import {
   findingIdParamSchema,
   findingStatsQuerySchema,
@@ -56,6 +56,17 @@ const SORT_ORDER: Record<ListQuery["sort"], (dir: Dir) => Prisma.FindingOrderByW
   lastSeenAt: (dir) => ({ lastSeenAt: dir }),
 };
 
+type BreakdownRow<K> = { key: K; found: number; falsePositives: number; rate: number | null };
+
+function breakdownRow<K>(key: K, found: number, falsePositives: number): BreakdownRow<K> {
+  return { key, found, falsePositives, rate: found ? Math.round((falsePositives / found) * 100) : null };
+}
+
+// Noisiest first, so the rows worth acting on lead.
+function byRate<K>(a: BreakdownRow<K>, b: BreakdownRow<K>) {
+  return (b.rate ?? -1) - (a.rate ?? -1) || b.found - a.found;
+}
+
 // "#12" (GitHub) and "!12" (GitLab) are how people write change numbers.
 const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
 
@@ -97,7 +108,8 @@ export async function getFindingStats(req: Request, res: Response) {
   const { repoId, days } = findingStatsQuerySchema.parse(req.query);
   const since = new Date(Date.now() - days * 86_400_000);
   const scope = { ...ownedBy(req.workspaceId!), ...(repoId ? { repositoryId: repoId } : {}) };
-  const [open, recent, staleOpen, resolvedRecently, found, falsePositives] = await prisma.$transaction([
+  const workspaceId = req.workspaceId!;
+  const [open, recent, staleOpen, resolvedRecently, found, falsePositives, byKind, byModel] = await prisma.$transaction([
     prisma.finding.groupBy({
       by: ["severity"],
       where: { ...scope, state: "open" },
@@ -123,14 +135,50 @@ export async function getFindingStats(req: Request, res: Response) {
     prisma.finding.count({
       where: { ...scope, firstSeenAt: { gte: since }, state: "ignored", ignoreReason: "false_positive" },
     }),
+    // Same population as `found`, split so category and severity can both be
+    // folded from one query.
+    prisma.finding.groupBy({
+      by: ["category", "severity", "state", "ignoreReason"],
+      where: { ...scope, firstSeenAt: { gte: since } },
+      orderBy: { category: "asc" },
+      _count: { _all: true },
+    }),
+    // The model is the one the last run reporting the finding was configured
+    // with, read from its stored config rather than a column on findings. A
+    // deleted run (or one stored before configs were) groups under null.
+    prisma.$queryRaw<{ model: string | null; found: number; false_positives: number }[]>`
+      SELECT j.resolved_config #>> '{config,llm,model}' AS model,
+        count(*)::int AS found,
+        (count(*) FILTER (WHERE f.state = 'ignored' AND f.ignore_reason = 'false_positive'))::int AS false_positives
+      FROM findings f
+      JOIN repositories r ON r.id = f.repository_id
+      JOIN forge_connections c ON c.id = r.connection_id
+      LEFT JOIN review_jobs j ON j.id = f.last_job_id
+      WHERE c.workspace_id = ${workspaceId}::uuid
+        AND (${repoId ?? null}::uuid IS NULL OR f.repository_id = ${repoId ?? null}::uuid)
+        AND f.first_seen_at >= ${since}
+      GROUP BY 1
+    `,
   ]);
-  const count =(row: { _count?: unknown }) => (row._count as { _all: number })._all;
+  const count = (row: { _count?: unknown }) => (row._count as { _all: number })._all;
   const openBySeverity = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<(typeof SEVERITIES)[number], number>;
   for (const row of open) {
     if (row.severity in openBySeverity) openBySeverity[row.severity as keyof typeof openBySeverity] = count(row);
   }
   const total = recent.reduce((sum, row) => sum + count(row), 0);
   const resolved = recent.filter((row) => row.state === "resolved").reduce((sum, row) => sum + count(row), 0);
+  const tally = <K extends string>(keys: readonly K[], keyOf: (row: (typeof byKind)[number]) => K) => {
+    const totals = new Map(keys.map((k) => [k, { found: 0, falsePositives: 0 }]));
+    for (const row of byKind) {
+      const entry = totals.get(keyOf(row));
+      if (!entry) continue;
+      entry.found += count(row);
+      if (row.state === "ignored" && row.ignoreReason === "false_positive") entry.falsePositives += count(row);
+    }
+    return [...totals]
+      .filter(([, t]) => t.found > 0)
+      .map(([key, t]) => breakdownRow(key, t.found, t.falsePositives));
+  };
   res.json({
     days,
     open: open.reduce((sum, row) => sum + count(row), 0),
@@ -143,6 +191,13 @@ export async function getFindingStats(req: Request, res: Response) {
     falsePositives,
     found,
     falsePositiveRate: found ? Math.round((falsePositives / found) * 100) : null,
+    // Every group with at least one finding; how few is too few to show is the
+    // dashboard's call.
+    falsePositivesBy: {
+      category: tally(CATEGORIES, (row) => row.category as Category).sort(byRate),
+      severity: tally(SEVERITIES, (row) => row.severity),
+      model: byModel.map((row) => breakdownRow(row.model, row.found, row.false_positives)).sort(byRate),
+    },
   });
 }
 

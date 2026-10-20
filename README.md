@@ -60,7 +60,8 @@ dashboard tracks reviews and findings across runs.
   [`.sentryward.yaml`](#review-configuration) in the repository.
 - **Findings across runs:** a later run never posts the same finding twice.
   Ignore findings as false positives, intentional, or fix later, and track the
-  false-positive rate on the dashboard.
+  false-positive rate on the dashboard, broken down by category, severity and
+  model with a pointer to the setting that would quiet the noisiest ones.
 - **Teams:** share connections, repositories, reviews and model keys in team
   workspaces, with owner, admin and member roles and one-time invite links.
 
@@ -481,6 +482,7 @@ so scripts written before workspaces keep working. Routes under
 | GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
 | POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
 | POST   | `/api/reviews/:id/cancel` | Cancels a queued or running review; a running one stops within one check interval (about 15s) and posts nothing more. `409` once it has finished |
+| GET    | `/api/findings/stats?repoId=&days=` | Open findings by severity, resolution rate, median time to resolve and the false-positive rate over the last `days` (1-365, default 30); `falsePositivesBy` breaks that rate down by `category`, `severity` and `model` (the model the last run reporting each finding was configured with, `null` once that run is deleted), each row `{ key, found, falsePositives, rate }` |
 | POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
 | POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Sentryward registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |

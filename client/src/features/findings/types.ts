@@ -57,6 +57,21 @@ export interface FindingStats {
   // Everything first seen in the period, ignored findings included.
   found: number
   falsePositiveRate: number | null
+  // The same population as `found`, grouped. Only groups with findings appear.
+  falsePositivesBy: {
+    category: FalsePositiveRow<FindingCategory>[]
+    severity: FalsePositiveRow<Severity>[]
+    // The model the last run reporting the finding was configured with; null
+    // when that run is gone.
+    model: FalsePositiveRow<string | null>[]
+  }
+}
+
+export interface FalsePositiveRow<K> {
+  key: K
+  found: number
+  falsePositives: number
+  rate: number | null
 }
 
 // GET /api/findings/:id: the row, plus the full finding and its change from the

@@ -21,6 +21,7 @@ import { ALL, selectedLabel } from "@/lib/filters"
 import { useRepos } from "@/features/forge/api"
 import { useFindings, type FindingQuery } from "@/features/findings/api"
 import { FindingDetailsSheet } from "@/features/findings/FindingDetailsSheet"
+import { FalsePositiveBreakdown } from "@/features/findings/FalsePositiveBreakdown"
 import { FindingStatsStrip } from "@/features/findings/FindingStatsStrip"
 import { FindingsTable } from "@/features/findings/FindingsTable"
 import { CATEGORY_OPTIONS, KIND_OPTIONS, SEVERITY_OPTIONS, STATE_OPTIONS } from "@/features/findings/options"
@@ -115,6 +116,7 @@ export function FindingsPage() {
         description="Issues raised across your reviews, tracked until they are resolved or ignored."
       />
       <FindingStatsStrip />
+      <FalsePositiveBreakdown />
       <FilterToolbar>
         <ActiveFilterChips filters={activeFilters} />
         <FilterPopover active={filtering} onClear={clearFilters}>

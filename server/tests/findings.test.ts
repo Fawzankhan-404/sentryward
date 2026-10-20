@@ -350,6 +350,80 @@ describe("GET /api/findings/stats", () => {
     });
   });
 
+  describe("false-positive breakdown", () => {
+    const fp = { state: "ignored", ignoreReason: "false_positive" } as const;
+
+    // Rows in the period with known categories and severities, plus one seen
+    // before it. Two changes, since one sample result has too few findings.
+    async function seed() {
+      await sync(base);
+      await sync(base, { number: 8 });
+      const [a, b, c, d, old] = await rows();
+      expect(old).toBeDefined();
+      await prisma.finding.updateMany({ where: { repositoryId: repoId }, data: { category: "bug", severity: "major" } });
+      await prisma.finding.update({ where: { id: a!.id }, data: { category: "style", severity: "minor", ...fp } });
+      await prisma.finding.update({ where: { id: b!.id }, data: { category: "style", severity: "minor" } });
+      await prisma.finding.update({ where: { id: c!.id }, data: fp });
+      // Ignored for another reason: found, but not a false positive.
+      await prisma.finding.update({ where: { id: d!.id }, data: { state: "ignored", ignoreReason: "intentional" } });
+      await prisma.finding.update({ where: { id: old!.id }, data: { ...fp, firstSeenAt: new Date(Date.now() - 40 * 86_400_000) } });
+      return { found: (await rows()).length - 1 };
+    }
+
+    it("groups found and false-positive counts by category and severity", async () => {
+      const { found } = await seed();
+      const res = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+      const bugs = found - 2;
+      expect(res.body.falsePositivesBy.category).toEqual([
+        { key: "style", found: 2, falsePositives: 1, rate: 50 },
+        { key: "bug", found: bugs, falsePositives: 1, rate: Math.round((1 / bugs) * 100) },
+      ]);
+      expect(res.body.falsePositivesBy.severity).toEqual([
+        { key: "major", found: bugs, falsePositives: 1, rate: Math.round((1 / bugs) * 100) },
+        { key: "minor", found: 2, falsePositives: 1, rate: 50 },
+      ]);
+    });
+
+    it("groups by the model of the run that last reported each finding", async () => {
+      const { found } = await seed();
+      await prisma.reviewJob.updateMany({
+        data: { resolvedConfig: { config: { llm: { model: "anthropic/claude-sonnet-5-5" } } } },
+      });
+      const res = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+      expect(res.body.falsePositivesBy.model).toEqual([
+        { key: "anthropic/claude-sonnet-5-5", found, falsePositives: 2, rate: Math.round((2 / found) * 100) },
+      ]);
+
+      await prisma.reviewJob.deleteMany();
+      const orphaned = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+      expect(orphaned.body.falsePositivesBy.model).toEqual([
+        { key: null, found, falsePositives: 2, rate: Math.round((2 / found) * 100) },
+      ]);
+    });
+
+    it("counts only the workspace's findings, narrowed by repository", async () => {
+      const { found } = await seed();
+      const other = await createUser("other@example.com");
+      const otherRepo = await createRepo(other.workspace.id, "other/app");
+      await sync(base, { repositoryId: otherRepo });
+      await prisma.finding.updateMany({ where: { repositoryId: otherRepo }, data: { category: "docs", ...fp } });
+      const secondRepo = await createRepo(workspaceId, "team/api");
+      await sync(base, { repositoryId: secondRepo });
+      await prisma.finding.updateMany({ where: { repositoryId: secondRepo }, data: { category: "security" } });
+
+      const all = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+      const categories = (all.body.falsePositivesBy.category as { key: string }[]).map((row) => row.key);
+      expect(categories).not.toContain("docs");
+      expect(categories).toContain("security");
+      const models = all.body.falsePositivesBy.model as { found: number }[];
+      expect(models.reduce((sum, row) => sum + row.found, 0)).toBe(all.body.found);
+
+      const narrowed = await request(app).get(`/api/findings/stats?repoId=${repoId}`).set("Cookie", cookie);
+      expect((narrowed.body.falsePositivesBy.category as { key: string }[]).map((row) => row.key)).toEqual(["style", "bug"]);
+      expect(narrowed.body.falsePositivesBy.model).toEqual([expect.objectContaining({ found, falsePositives: 2 })]);
+    });
+  });
+
   it("leaves ignored findings out of the rate", async () => {
     await sync(base);
     await prisma.finding.updateMany({ data: { state: "ignored" } });
