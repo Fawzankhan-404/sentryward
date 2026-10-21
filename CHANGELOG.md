@@ -10,6 +10,17 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- Replies on Sentryward's inline comments get a response in the thread.
+  `/sentryward ignore false-positive|intentional [note]` ignores the finding
+  with that reason and note, as the dashboard does, and is acknowledged; any
+  other reply is answered once, briefly, by the review model from the finding
+  and its code, with the reply passed as untrusted data. Only people who can
+  push are answered, the bot never answers itself, and at most 10 replies per
+  PR/MR per hour are acted on. Turned off with `triggers.replies` or the new
+  "Respond to replies" switch. GitHub needs the **Pull request review
+  comment** webhook event (added to new per-repository hooks; add it to the
+  GitHub App's events). Replies are queued in a new `thread_replies` table and
+  answered by the worker; requires a database migration.
 - GitLab can be connected through OAuth ("Connect with GitLab") as well as
   with an access token, on GitLab.com or one self-hosted instance per
   deployment, configured with `GITLAB_OAUTH_HOST`, `GITLAB_OAUTH_CLIENT_ID`
