@@ -5,6 +5,9 @@ export function downloadText(text: string, filename: string, type = "text/plain"
   const a = document.createElement("a")
   a.href = url
   a.download = filename
+  a.style.display = "none"
+  document.body.append(a)
   a.click()
+  a.remove()
   URL.revokeObjectURL(url)
 }
