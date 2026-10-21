@@ -444,7 +444,8 @@ describe("runJob", () => {
     await runJob(job, runDeps);
 
     expect(published.summaries).toHaveLength(2);
-    expect(published.summaries[0]).toContain("Reviewing `newhead`");
+    expect(published.summaries[0]).toMatch(/^⏳ \*\*Reviewing \[?`newhead`/);
+    expect(published.summaries[0]).not.toContain("## Summary");
     expect(published.summaries[1]).toMatch(/^## Summary\n/);
     expect(published.statuses).toEqual(["pending", "failure"]);
     expect(published.inline).toHaveLength(1);

@@ -17,6 +17,8 @@ export interface ForgeInfo {
   parseChangePath(path: string): { project: string; number: number } | null;
   // The info string of a suggestion block covering startLine..endLine.
   suggestionInfo(startLine: number, endLine: number): string;
+  // A commit viewed inside its change, so the link keeps the PR/MR context.
+  commitUrl(changeUrl: string, sha: string): string;
 }
 
 function pathMatcher(pattern: RegExp) {
@@ -34,12 +36,14 @@ export const FORGE_INFO: Record<ForgeProvider, ForgeInfo> = {
     // GitLab anchors on the first line, so the block says how many lines below
     // it to replace.
     suggestionInfo: (startLine, endLine) => `suggestion:-0+${endLine - startLine}`,
+    commitUrl: (changeUrl, sha) => `${changeUrl}/diffs?commit_id=${sha}`,
   },
   github: {
     name: "GitHub",
     parseChangePath: pathMatcher(/^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/.*)?$/),
     // GitHub's suggestion replaces exactly the commented range.
     suggestionInfo: () => "suggestion",
+    commitUrl: (changeUrl, sha) => `${changeUrl}/commits/${sha}`,
   },
 };
 

@@ -286,7 +286,8 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   if (publishes(config)) {
     // Best effort: a review must not fail because its progress note did.
     if (config.output.postSummary) {
-      await forge.upsertSummaryComment(ref, progressMarkdown(changeSet)).catch((err: unknown) => {
+      const outputs = { walkthrough, inline: config.output.postInline, status: config.output.postCheck };
+      await forge.upsertSummaryComment(ref, progressMarkdown(changeSet, outputs)).catch((err: unknown) => {
         warnings.push(`Progress comment failed: ${message(err)}`);
       });
     }
