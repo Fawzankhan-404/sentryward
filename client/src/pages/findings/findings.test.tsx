@@ -106,6 +106,7 @@ describe("Findings page", () => {
       "GET /api/findings?state=open&page=1&limit=10": page([finding]),
     })
     renderWithProviders(<App />, { route: "/findings" })
+    await userEvent.click(await screen.findByRole("tab", { name: "False positives" }))
 
     const byCategory = await screen.findByRole("table", { name: "False positives by category" })
     const style = within(byCategory).getByText("Style").closest("tr")!
@@ -151,10 +152,10 @@ describe("Findings page", () => {
       "GET /api/findings?state=open&page=1&limit=10": page([finding]),
       "GET /api/findings?repoId=r2&state=open&page=1&limit=10": page([finding]),
     })
-    renderWithProviders(<App />, { route: "/findings" })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
     await screen.findByRole("table", { name: "False positives by category" })
 
-    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    // The tab has its own repository picker, since the findings filters are not shown there.
     await userEvent.click(await screen.findByRole("combobox", { name: "Repository" }))
     await userEvent.click(screen.getByRole("option", { name: "team/api" }))
 
@@ -168,6 +169,62 @@ describe("Findings page", () => {
       "href",
       "/configuration?tab=llm&repo=r2",
     )
+
+    // The scope is shared, so the findings list is narrowed to the same repository.
+    await userEvent.click(screen.getByRole("tab", { name: "Findings" }))
+    expect(await screen.findByRole("button", { name: /Remove Repository filter/i })).toBeInTheDocument()
+  })
+
+  it("keeps the breakdown and the findings list on separate tabs", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "SQL built from input" })
+    expect(screen.getByRole("tab", { name: "Findings" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("region", { name: "False positive breakdown" })).toBeNull()
+
+    await userEvent.click(screen.getByRole("tab", { name: "False positives" }))
+    expect(await screen.findByRole("region", { name: "False positive breakdown" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "SQL built from input" })).toBeNull()
+    // The cards sit above the tabs, so they stay on both.
+    expect(screen.getByRole("region", { name: "Finding stats" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Filters" })).toBeNull()
+  })
+
+  it("keeps the findings filters when switching tabs and back", async () => {
+    const resolved = { ...finding, id: "f-2", state: "resolved" as const, title: "Old bug" }
+    mockApi({
+      "GET /api/findings/stats": stats,
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding, resolved]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "SQL built from input" })
+    await userEvent.click(screen.getByRole("button", { name: /Remove State filter/i }))
+    await screen.findByRole("button", { name: "Old bug" })
+
+    await userEvent.click(screen.getByRole("tab", { name: "False positives" }))
+    await screen.findByRole("region", { name: "False positive breakdown" })
+    await userEvent.click(screen.getByRole("tab", { name: "Findings" }))
+
+    expect(await screen.findByRole("button", { name: "Old bug" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Remove State filter/i })).toBeNull()
+  })
+
+  it("shows an empty state on the false positives tab when there are no findings", async () => {
+    mockApi({
+      "GET /api/findings/stats": { ...stats, found: 0, falsePositives: 0, falsePositiveRate: null },
+      "GET /api/findings?state=open&page=1&limit=10": page([]),
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
+
+    expect(await screen.findByText("No findings yet")).toBeInTheDocument()
+    expect(screen.getByText(/nothing to break down/)).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "False positive breakdown" })).toBeNull()
   })
 
   it("lists every state once the state filter is removed", async () => {

@@ -1,6 +1,10 @@
 import type { ReactNode } from "react"
+import { AlertTriangle, ShieldCheck } from "lucide-react"
 import { Link } from "react-router"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { SeverityBadge } from "@/features/reviews/badges"
 import { useFindingStats } from "./api"
@@ -107,10 +111,33 @@ interface FalsePositiveBreakdownProps {
 
 // Where the overall false-positive rate comes from, with a pointer to the
 // setting that would quiet the noisiest groups. Shares the stats query with
-// the cards when unscoped, and stays out of the way if it fails.
+// the cards when unscoped. It is the whole of its tab, so loading, failure
+// and no data each get a state of their own rather than an empty tab.
 export function FalsePositiveBreakdown({ repoId, repoName }: FalsePositiveBreakdownProps) {
   const { data, isPending, isError } = useFindingStats(repoId)
-  if (isPending || isError || data.found === 0) return null
+  if (isPending) return <Skeleton className="h-64 w-full" />
+  if (isError)
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle />
+        <AlertTitle>Could not load false-positive stats.</AlertTitle>
+      </Alert>
+    )
+  if (data.found === 0)
+    return (
+      <Empty className="border border-dashed">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <ShieldCheck />
+          </EmptyMedia>
+          <EmptyTitle>No findings yet</EmptyTitle>
+          <EmptyDescription>
+            No findings were first seen in the last {data.days} days{repoName ? ` in ${repoName}` : ""}, so there is
+            nothing to break down.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    )
 
   const by = data.falsePositivesBy
   return (
