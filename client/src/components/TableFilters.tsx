@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { ALL } from "@/lib/filters"
+import { cn } from "@/lib/utils"
 
 // Sits above the table card: active filter chips, filter button, then search,
 // aligned right.
@@ -76,13 +77,15 @@ export function SearchInput({
   label,
   value,
   onChange,
+  className,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  className?: string
 }) {
   return (
-    <InputGroup className="w-full sm:w-72">
+    <InputGroup className={cn("w-full sm:w-72", className)}>
       <InputGroupAddon>
         <Search />
       </InputGroupAddon>

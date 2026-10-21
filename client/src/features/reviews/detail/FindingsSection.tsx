@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
 import { ChevronsDownUp, ChevronsUpDown, FileCode } from "lucide-react"
+import { SearchInput } from "@/components/TableFilters"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ALL } from "@/lib/filters"
@@ -38,17 +39,22 @@ function useFindingFilters() {
   )
   const rawBucket = params.get("bucket")
   const bucket = BUCKET_ORDER.includes(rawBucket as Bucket) ? (rawBucket as Bucket) : null
+  // Kept untrimmed so the input shows exactly what was typed; matching trims it.
+  const file = params.get("file") ?? ""
 
-  function update(next: { severities?: Set<Severity>; bucket?: Bucket | null }) {
+  function update(next: { severities?: Set<Severity>; bucket?: Bucket | null; file?: string }) {
     setParams(
       (prev) => {
         const out = new URLSearchParams(prev)
         const sev = next.severities ?? severities
         const b = next.bucket === undefined ? bucket : next.bucket
+        const f = next.file ?? file
         if (sev.size) out.set("severity", SEVERITIES.filter((s) => sev.has(s)).join(","))
         else out.delete("severity")
         if (b) out.set("bucket", b)
         else out.delete("bucket")
+        if (f) out.set("file", f)
+        else out.delete("file")
         return out
       },
       { replace: true },
@@ -58,7 +64,8 @@ function useFindingFilters() {
   return {
     severities,
     bucket,
-    active: severities.size > 0 || bucket !== null,
+    file,
+    active: severities.size > 0 || bucket !== null || file.trim() !== "",
     toggleSeverity(severity: Severity) {
       const next = new Set(severities)
       if (next.has(severity)) next.delete(severity)
@@ -66,7 +73,8 @@ function useFindingFilters() {
       update({ severities: next })
     },
     setBucket: (value: Bucket | null) => update({ bucket: value }),
-    clear: () => update({ severities: new Set(), bucket: null }),
+    setFile: (value: string) => update({ file: value }),
+    clear: () => update({ severities: new Set(), bucket: null, file: "" }),
   }
 }
 
@@ -83,8 +91,12 @@ export function FindingsSection({ result }: { result: ReviewResult }) {
     return out
   }, [result.findings])
 
+  const fileQuery = filters.file.trim().toLowerCase()
   const visible = result.findings.filter(
-    (f) => (!filters.severities.size || filters.severities.has(f.severity)) && (!filters.bucket || f.bucket === filters.bucket),
+    (f) =>
+      (!filters.severities.size || filters.severities.has(f.severity)) &&
+      (!filters.bucket || f.bucket === filters.bucket) &&
+      (!fileQuery || f.file.toLowerCase().includes(fileQuery)),
   )
 
   function setAll(expanded: boolean) {
@@ -159,6 +171,12 @@ export function FindingsSection({ result }: { result: ReviewResult }) {
             ))}
           </SelectContent>
         </Select>
+        <SearchInput
+          label="Filter by file path"
+          value={filters.file}
+          onChange={filters.setFile}
+          className="h-7 compact:h-7 spacious:h-7 sm:w-56 [&_input]:text-xs"
+        />
         {filters.active && (
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={filters.clear}>
             Clear filters
