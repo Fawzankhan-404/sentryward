@@ -55,7 +55,7 @@ export async function recordThreadReply(input: ThreadReplyInput): Promise<Webhoo
   } catch (err) {
     // Not retried here: the forge is waiting on this response. A failed
     // delivery shows in its webhook log, where it can be redelivered.
-    console.error(`[webhook] could not check reply ${commentId} on ${repo.fullPath}#${number}`, err);
+    console.error("[webhook] could not check reply %s on %s#%d", commentId, repo.fullPath, number, err);
     throw new HttpError(503, "Could not reach the forge to check this reply");
   }
   if (!root?.ownedBySelf || !root.fingerprint) return { body: { outcome: "ignored" } };
