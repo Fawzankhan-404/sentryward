@@ -239,13 +239,49 @@ describe("agent prompts", () => {
   });
 });
 
+const ALL_OUTPUTS = { walkthrough: true, inline: true, status: true };
+
+describe("progressMarkdown", () => {
+  it("is a status line with no heading, linking the short SHA to the commit", () => {
+    const body = progressMarkdown({ ...makeChangeSet(), forgeRef: { ...makeChangeSet().forgeRef, headSha: "abcdef1234567" } }, ALL_OUTPUTS);
+    expect(body).not.toMatch(/^#/m);
+    expect(body.startsWith("⏳ **Reviewing [`abcdef1`](https://github.com/acme/web/pull/42/commits/abcdef1234567)**\n")).toBe(true);
+    expect(body).toContain(
+      "a walkthrough and summary here, findings as inline comments on the diff and the `sentryward/review` commit status.",
+    );
+  });
+
+  it("links GitLab commits inside the merge request", () => {
+    const changeSet = makeChangeSet();
+    changeSet.forgeRef = { ...changeSet.forgeRef, provider: "gitlab", webUrl: "https://gitlab.com/acme/web/-/merge_requests/42" };
+    expect(progressMarkdown(changeSet, ALL_OUTPUTS)).toContain(
+      "[`head`](https://gitlab.com/acme/web/-/merge_requests/42/diffs?commit_id=head)",
+    );
+  });
+
+  it("falls back to a plain SHA and only promises what will be published", () => {
+    const changeSet = makeChangeSet();
+    changeSet.forgeRef = { ...changeSet.forgeRef, webUrl: undefined };
+    const body = progressMarkdown(changeSet, { walkthrough: false, inline: false, status: false });
+    expect(body).toContain("⏳ **Reviewing `head`**");
+    expect(body).toContain("when it finishes: a summary here.</sub>");
+    expect(body).not.toMatch(/walkthrough|inline|commit status/);
+  });
+
+  it("keeps the footer and then the summary marker so the review replaces it", () => {
+    const body = progressMarkdown(makeChangeSet(), ALL_OUTPUTS);
+    expect(body.indexOf(BRAND_FOOTER)).toBeLessThan(body.indexOf(SUMMARY_MARKER));
+    expect(body.trimEnd().endsWith(SUMMARY_MARKER)).toBe(true);
+  });
+});
+
 describe("branding", () => {
   it("names Sentryward only in the footer of every posted body", async () => {
     const result = await sampleResult();
     const bodies = [
       toMarkdown(result),
       walkthroughMarkdown(result),
-      progressMarkdown(makeChangeSet()),
+      progressMarkdown(makeChangeSet(), ALL_OUTPUTS),
       ...result.findings.map((f) => inlineBody(f, "github")),
     ];
     for (const body of bodies) {
