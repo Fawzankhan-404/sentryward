@@ -612,13 +612,16 @@ describe("Review detail page", () => {
   // jsdom has no object URLs and would try to navigate on an anchor click.
   function stubDownload() {
     const blobs: Blob[] = []
+    let wasAttachedWhenClicked = false
     URL.createObjectURL = vi.fn((blob: Blob) => {
       blobs.push(blob)
       return "blob:review"
     })
     URL.revokeObjectURL = vi.fn()
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-    return { blobs, click }
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      wasAttachedWhenClicked = this.isConnected
+    })
+    return { blobs, click, wasAttachedWhenClicked: () => wasAttachedWhenClicked }
   }
 
   it("downloads the review markdown as a file", async () => {
@@ -627,7 +630,7 @@ describe("Review detail page", () => {
       [`GET /api/reviews/${detail.id}`]: { review: detail },
       [`GET /api/reviews/${detail.id}/markdown`]: () => new Response(markdown, { status: 200 }),
     })
-    const { blobs, click } = stubDownload()
+    const { blobs, click, wasAttachedWhenClicked } = stubDownload()
     renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
 
     await userEvent.click(await screen.findByRole("button", { name: "Download markdown" }))
@@ -635,6 +638,8 @@ describe("Review detail page", () => {
     await waitFor(() => expect(click).toHaveBeenCalledOnce())
     expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(`sentryward-review-${detail.id}.md`)
     expect(await blobs[0].text()).toBe(markdown)
+    expect(wasAttachedWhenClicked()).toBe(true)
+    expect(document.querySelector(`[download="sentryward-review-${detail.id}.md"]`)).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Copy markdown" })).toBeEnabled()
   })
 
