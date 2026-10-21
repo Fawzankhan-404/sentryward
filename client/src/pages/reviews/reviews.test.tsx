@@ -467,6 +467,64 @@ describe("Review detail page", () => {
     expect(screen.queryByText("SQL injection in search")).not.toBeInTheDocument()
   })
 
+  const FILE_BY_TITLE: Record<string, string> = {
+    "SQL injection in search": "src/auth/Login.ts",
+    "Rename c": "src/app.ts",
+    "Caller ignores result": "src/auth/session.ts",
+  }
+  const spreadAcrossFiles = {
+    ...detail,
+    result: {
+      ...detail.result!,
+      findings: detail.result!.findings.map((f) => ({ ...f, file: FILE_BY_TITLE[f.title] })),
+    },
+  }
+
+  it("filters findings by a case-insensitive file path substring", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: spreadAcrossFiles } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    await userEvent.type(await screen.findByRole("searchbox", { name: "Filter by file path" }), "  AUTH/ ")
+
+    expect(screen.getByText("SQL injection in search")).toBeInTheDocument()
+    expect(screen.getByText("Caller ignores result")).toBeInTheDocument()
+    expect(screen.queryByText("Rename c")).not.toBeInTheDocument()
+  })
+
+  it("combines the file path filter with severity", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: spreadAcrossFiles } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}?file=auth&severity=critical` })
+
+    expect(await screen.findByText("SQL injection in search")).toBeInTheDocument()
+    expect(screen.queryByText("Caller ignores result")).not.toBeInTheDocument()
+    expect(screen.queryByText("Rename c")).not.toBeInTheDocument()
+  })
+
+  it("reads the file path filter from the URL", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: spreadAcrossFiles } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}?file=app.ts` })
+
+    expect(await screen.findByText("Rename c")).toBeInTheDocument()
+    expect(screen.getByRole("searchbox", { name: "Filter by file path" })).toHaveValue("app.ts")
+    expect(screen.queryByText("SQL injection in search")).not.toBeInTheDocument()
+  })
+
+  it("shows the filtered empty state when no path matches and clears the query", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: spreadAcrossFiles } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const search = await screen.findByRole("searchbox", { name: "Filter by file path" })
+    await userEvent.type(search, "nope")
+    expect(screen.getByText("No findings match these filters.")).toBeInTheDocument()
+
+    const toolbar = screen.getByRole("toolbar", { name: "Filter findings" })
+    await userEvent.click(within(toolbar).getByRole("button", { name: "Clear filters" }))
+    expect(search).toHaveValue("")
+    expect(screen.getByText("SQL injection in search")).toBeInTheDocument()
+    expect(screen.getByText("Rename c")).toBeInTheDocument()
+    expect(screen.getByText("Caller ignores result")).toBeInTheDocument()
+  })
+
   it("copies an agent prompt for one finding", async () => {
     mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
     const user = userEvent.setup()
