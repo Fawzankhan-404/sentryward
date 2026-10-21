@@ -164,9 +164,13 @@ export function ReviewDetailPage() {
               <Bot />
               Copy prompt for all findings
             </Button>
-            <Button variant="outline" onClick={copyMarkdown} disabled={!result || copying}>
+            <Button
+              variant="outline"
+              onClick={copyMarkdown}
+              disabled={!result || copying}
+            >
               {copying ? <Loader2 className="animate-spin" /> : <Copy />}
-              Copy markdown
+              {copying ? "Copying markdown" : "Copy markdown"}
             </Button>
             <Button variant="outline" onClick={downloadMarkdown} disabled={!result || downloading}>
               {downloading ? <Loader2 className="animate-spin" /> : <Download />}

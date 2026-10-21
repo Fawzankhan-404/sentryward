@@ -638,6 +638,28 @@ describe("Review detail page", () => {
     expect(screen.getByRole("button", { name: "Copy markdown" })).toBeEnabled()
   })
 
+  it("shows a pending state while copying the review markdown", async () => {
+    const markdown = "# Sentryward review\n"
+    let resolveMarkdown!: (response: Response) => void
+    const pendingMarkdown = new Promise<Response>((resolve) => {
+      resolveMarkdown = resolve
+    })
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: detail },
+      [`GET /api/reviews/${detail.id}/markdown`]: () => pendingMarkdown,
+    })
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue()
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const copy = await screen.findByRole("button", { name: "Copy markdown" })
+    await userEvent.click(copy)
+
+    expect(screen.getByRole("button", { name: "Copying markdown" })).toBeDisabled()
+    resolveMarkdown(new Response(markdown, { status: 200 }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy markdown" })).toBeEnabled())
+    expect(writeText).toHaveBeenCalledWith(markdown)
+  })
+
   it("offers no markdown download without a result", async () => {
     mockApi({
       [`GET /api/reviews/${detail.id}`]: { review: { ...detail, status: "failed", verdict: "error", result: null } },
