@@ -8,7 +8,7 @@ import { copyToClipboard } from "@/lib/clipboard"
 import { formatDuration, timeAgo } from "@/lib/time"
 import { TriggerIcon } from "../badges"
 import { TRIGGER_LABEL } from "../options"
-import type { Publication, ReviewDetail, ReviewResult } from "../types"
+import type { DropReason, Publication, ReviewDetail, ReviewResult } from "../types"
 
 const OMISSION_TEXT: Record<string, string> = {
   ignored: "ignored by configuration",
@@ -20,7 +20,7 @@ const OMISSION_TEXT: Record<string, string> = {
   chunk_failed: "review pass failed",
 }
 
-const DROP_REASON_TEXT: Record<string, string> = {
+const DROP_REASON_TEXT: Record<DropReason, string> = {
   invalid_line: "Invalid line number",
   unknown_file: "File not in the change",
   category: "Category not enabled",
@@ -36,8 +36,8 @@ const DROP_REASON_TEXT: Record<string, string> = {
 
 // A reason added on the server before the client knows it still reads as text.
 function dropReasonText(reason: string) {
-  const known = DROP_REASON_TEXT[reason]
-  if (known) return known
+  // hasOwn, so a reason like "toString" is not read off the prototype.
+  if (Object.hasOwn(DROP_REASON_TEXT, reason)) return DROP_REASON_TEXT[reason as DropReason]
   const words = reason.replace(/_/g, " ").trim()
   return words ? words[0].toUpperCase() + words.slice(1) : reason
 }
@@ -179,17 +179,25 @@ function ValidationCard({ result }: { result: ReviewResult }) {
     <SideCard title="Validation">
       {drops.length > 0 && (
         <>
-          <p className="text-muted-foreground">Filtered before publishing</p>
+          <p className="text-muted-foreground">Left out of the review</p>
           <dl className="flex flex-col gap-1.5">
             {drops.map(([reason, count]) => (
-              <Row key={reason} label={dropReasonText(reason)}>
-                {count}
-              </Row>
+              // Not Row: its label never shrinks, so a long reason would hide the count.
+              <div key={reason} className="flex items-baseline justify-between gap-3">
+                <dt className="min-w-0 break-words text-muted-foreground">{dropReasonText(reason)}</dt>
+                <dd className="shrink-0 tabular-nums">{count}</dd>
+              </div>
             ))}
           </dl>
         </>
       )}
-      {demoted > 0 && <p>{plural(demoted, "finding")} downgraded because evidence was missing or unverified</p>}
+      {demoted > 0 && (
+        <>
+          <p>{plural(demoted, "finding")} downgraded because evidence was missing or unverified</p>
+          {/* The server counts a demotion before later drops (below floor, duplicate, ...). */}
+          {drops.length > 0 && <p className="text-muted-foreground">A downgraded finding can also be counted above.</p>}
+        </>
+      )}
     </SideCard>
   )
 }

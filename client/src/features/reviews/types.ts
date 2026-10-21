@@ -55,6 +55,21 @@ export interface Omission {
   detail?: string
 }
 
+// Mirrors DropReason in server/src/review/validate/validator.ts. Results can
+// still carry reasons the client does not know, so `dropped` stays keyed by string.
+export type DropReason =
+  | "invalid_line"
+  | "unknown_file"
+  | "category"
+  | "off_diff"
+  | "low_confidence"
+  | "below_floor"
+  | "empty"
+  | "duplicate"
+  | "over_limit"
+  | "previously_ignored"
+  | "refuted"
+
 export interface UsageTotals {
   calls: number
   inputTokens: number

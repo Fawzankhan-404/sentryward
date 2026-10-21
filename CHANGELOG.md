@@ -11,7 +11,7 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 ### Added
 
 - Review details show a Validation card with how many candidate findings were
-  filtered before publishing, by reason (low confidence, duplicate, outside
+  left out of the review, by reason (low confidence, duplicate, outside
   changed lines, ...), and how many were downgraded because evidence was
   missing or unverified. Only counts are shown, never the discarded findings,
   and the card is hidden when nothing was filtered or downgraded.
