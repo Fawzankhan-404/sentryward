@@ -18,6 +18,10 @@ export default defineConfig({
       GITHUB_APP_CLIENT_SECRET: "client-secret",
       GITHUB_WEBHOOK_SECRET: "webhook-secret",
       API_PUBLIC_URL: "https://sentryward.example.com",
+      // A self-hosted GitLab OAuth app; token exchanges are stubbed like every forge call.
+      GITLAB_OAUTH_HOST: "gitlab.acme.com",
+      GITLAB_OAUTH_CLIENT_ID: "gitlab-client-id",
+      GITLAB_OAUTH_CLIENT_SECRET: "gitlab-client-secret",
     },
   },
 });

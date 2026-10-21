@@ -30,7 +30,8 @@ export interface ProviderDefinition {
     schema: z.ZodType<{ host: string; token: string }, unknown>;
     account(host: string, token: string): Promise<ForgeAccount>;
   };
-  // Whether this server has an app install flow configured for the forge.
+  // Whether this server has a browser connect flow configured for the forge
+  // (GitHub App install, GitLab OAuth).
   appAvailable?(): boolean;
   // The webhook state when this connection's events arrive through an app, or
   // null when Sentryward registers a hook on each repository instead.

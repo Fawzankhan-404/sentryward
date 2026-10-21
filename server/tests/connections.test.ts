@@ -7,7 +7,8 @@ import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
 import { encryptWithOtherKey } from "./helpers/foreignKey.ts";
-import { createTeam, createUser } from "./helpers/users.ts";
+import { gitlabAccessToken, ReconnectRequiredError } from "../src/services/gitlabOAuth.ts";
+import { addMember, createTeam, createUser } from "./helpers/users.ts";
 
 let cookie: string;
 let userId: string;
@@ -173,7 +174,8 @@ describe("GET /api/connections", () => {
     const res = await request(app).get("/api/connections").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body.availableApps).toEqual(["github"]);
+    expect(res.body.availableApps).toEqual(["gitlab", "github"]);
+    expect(res.body.oauthHosts).toEqual({ gitlab: "gitlab.acme.com" });
     expect(res.body.connections).toHaveLength(1);
     expect(res.body.connections[0]).toMatchObject({
       accountLogin: "me",
@@ -426,5 +428,222 @@ describe("GitHub App installation", () => {
       .set("Cookie", cookie);
 
     expect(res.headers.location).toContain("error=github_pending_approval");
+  });
+});
+
+describe("GitLab OAuth", () => {
+  const TOKEN_URL = /gitlab\.acme\.com\/oauth\/token$/;
+  const tokenRoute = (access = "oauth-access", refresh = "oauth-refresh") => ({
+    method: "POST",
+    url: TOKEN_URL,
+    body: { access_token: access, refresh_token: refresh, expires_in: 7200, token_type: "Bearer" },
+  });
+  const userRoute = { url: /gitlab\.acme\.com\/api\/v4\/user$/, body: { username: "dev" } };
+
+  const start = async (query = "") => {
+    const res = await request(app).get(`/api/connections/gitlab/oauth/start${query}`).set("Cookie", cookie);
+    return { res, state: res.status === 302 ? new URL(res.headers.location!).searchParams.get("state")! : "" };
+  };
+  const callback = (query: string, as = cookie) =>
+    request(app).get(`/api/connections/gitlab/oauth/callback?${query}`).set("Cookie", as);
+
+  const oauthConnection = (expiresAt: Date | null, refresh = "old-refresh") =>
+    prisma.forgeConnection.create({
+      data: {
+        workspaceId,
+        provider: "gitlab",
+        host: "gitlab.acme.com",
+        kind: "oauth",
+        accountLogin: "dev",
+        encryptedToken: encrypt("old-access"),
+        encryptedRefreshToken: encrypt(refresh),
+        tokenExpiresAt: expiresAt,
+      },
+    });
+
+  describe("start", () => {
+    it("redirects to the instance's authorize page with a single-use state and PKCE", async () => {
+      const { res, state } = await start();
+
+      expect(res.status).toBe(302);
+      const location = new URL(res.headers.location!);
+      expect(location.origin + location.pathname).toBe("https://gitlab.acme.com/oauth/authorize");
+      expect(Object.fromEntries(location.searchParams)).toMatchObject({
+        client_id: "gitlab-client-id",
+        redirect_uri: `${env.CLIENT_ORIGIN}/api/connections/gitlab/oauth/callback`,
+        response_type: "code",
+        scope: "api",
+        code_challenge_method: "S256",
+      });
+      expect(location.searchParams.get("code_challenge")).toBeTruthy();
+      expect(await prisma.oAuthState.findUniqueOrThrow({ where: { id: state } })).toMatchObject({
+        userId,
+        workspaceId,
+        host: "gitlab.acme.com",
+      });
+    });
+
+    it("refuses workspace members who are not admins", async () => {
+      const other = await createUser("owner@example.com");
+      const team = await createTeam(other.user.id, "Acme");
+      await addMember(team.id, userId, "member");
+
+      const { res } = await start(`?workspace=${team.id}`);
+
+      expect(res.status).toBe(403);
+      expect(await prisma.oAuthState.count()).toBe(0);
+    });
+
+    it("503s when no OAuth app is configured", async () => {
+      const clientId = env.GITLAB_OAUTH_CLIENT_ID;
+      env.GITLAB_OAUTH_CLIENT_ID = undefined;
+      try {
+        expect((await start()).res.status).toBe(503);
+      } finally {
+        env.GITLAB_OAUTH_CLIENT_ID = clientId;
+      }
+    });
+  });
+
+  describe("callback", () => {
+    it("exchanges the code and stores an OAuth connection with encrypted tokens", async () => {
+      const { state } = await start();
+      const { fetch, calls } = fetchStub([tokenRoute(), userRoute]);
+      vi.stubGlobal("fetch", fetch);
+
+      const res = await callback(`code=abc&state=${state}`);
+
+      expect(res.headers.location).toBe(`${env.CLIENT_ORIGIN}/repositories?tab=installation&connected=gitlab`);
+      const exchange = new URLSearchParams(calls[0]!.body);
+      expect(Object.fromEntries(exchange)).toMatchObject({
+        grant_type: "authorization_code",
+        code: "abc",
+        client_secret: "gitlab-client-secret",
+      });
+      expect(exchange.get("code_verifier")).toBeTruthy();
+      expect(calls[1]!.headers.authorization).toBe("Bearer oauth-access");
+
+      const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { workspaceId } });
+      expect(stored).toMatchObject({ provider: "gitlab", kind: "oauth", host: "gitlab.acme.com", accountLogin: "dev" });
+      expect(stored.encryptedToken).not.toContain("oauth-access");
+      expect(decrypt(stored.encryptedToken!)).toBe("oauth-access");
+      expect(decrypt(stored.encryptedRefreshToken!)).toBe("oauth-refresh");
+      expect(stored.tokenExpiresAt!.getTime()).toBeGreaterThan(Date.now() + 7000 * 1000);
+    });
+
+    it("updates the same connection when the account connects again", async () => {
+      vi.stubGlobal("fetch", fetchStub([tokenRoute("second"), userRoute]).fetch);
+      await oauthConnection(new Date());
+
+      await callback(`code=abc&state=${(await start()).state}`);
+
+      const stored = await prisma.forgeConnection.findMany({ where: { workspaceId } });
+      expect(stored).toHaveLength(1);
+      expect(decrypt(stored[0]!.encryptedToken!)).toBe("second");
+    });
+
+    it("rejects a missing, unknown or reused state", async () => {
+      vi.stubGlobal("fetch", fetchStub([tokenRoute(), userRoute]).fetch);
+      const { state } = await start();
+
+      expect((await callback("code=abc")).headers.location).toContain("error=gitlab_oauth_failed");
+      expect((await callback("code=abc&state=forged")).headers.location).toContain("error=gitlab_oauth_failed");
+      expect((await callback(`code=abc&state=${state}`)).headers.location).toContain("connected=gitlab");
+      expect((await callback(`code=abc&state=${state}`)).headers.location).toContain("error=gitlab_oauth_failed");
+      expect(await prisma.forgeConnection.count()).toBe(1);
+    });
+
+    it("rejects an expired state and one issued to another user", async () => {
+      vi.stubGlobal("fetch", fetchStub([tokenRoute(), userRoute]).fetch);
+      const expired = await start();
+      await prisma.oAuthState.update({ where: { id: expired.state }, data: { expiresAt: new Date(Date.now() - 1000) } });
+      const theirs = await start();
+      const other = await createUser("other@example.com");
+
+      expect((await callback(`code=abc&state=${expired.state}`)).headers.location).toContain("error=gitlab_oauth_failed");
+      expect((await callback(`code=abc&state=${theirs.state}`, other.cookie)).headers.location).toContain(
+        "error=gitlab_oauth_failed",
+      );
+      expect(await prisma.forgeConnection.count()).toBe(0);
+    });
+
+    it("reports a cancelled authorization and uses up the state", async () => {
+      const { state } = await start();
+      vi.stubGlobal("fetch", fetchStub([]).fetch);
+
+      const res = await callback(`error=access_denied&state=${state}`);
+
+      expect(res.headers.location).toContain("error=gitlab_oauth_denied");
+      expect(await prisma.oAuthState.count()).toBe(0);
+    });
+
+    it("refuses a code GitLab will not exchange", async () => {
+      const { state } = await start();
+      vi.stubGlobal("fetch", fetchStub([{ method: "POST", url: TOKEN_URL, status: 400, body: { error: "invalid_grant" } }]).fetch);
+
+      expect((await callback(`code=abc&state=${state}`)).headers.location).toContain("error=gitlab_oauth_failed");
+      expect(await prisma.forgeConnection.count()).toBe(0);
+    });
+  });
+
+  describe("access token refresh", () => {
+    it("uses the stored token while it is fresh", async () => {
+      const connection = await oauthConnection(new Date(Date.now() + 60 * 60 * 1000));
+      const { fetch, calls } = fetchStub([]);
+      vi.stubGlobal("fetch", fetch);
+
+      expect(await gitlabAccessToken(connection.id)).toBe("old-access");
+      expect(calls).toHaveLength(0);
+    });
+
+    it("refreshes an expiring token before a forge call and stores the rotated tokens", async () => {
+      const connection = await oauthConnection(new Date(Date.now() + 30 * 1000));
+      const { fetch, calls } = fetchStub([tokenRoute("new-access", "new-refresh"), userRoute]);
+      vi.stubGlobal("fetch", fetch);
+
+      const status = await request(app).get(`/api/connections/${connection.id}/status`).set("Cookie", cookie);
+
+      expect(status.body.status).toBe("active");
+      expect(Object.fromEntries(new URLSearchParams(calls[0]!.body))).toMatchObject({
+        grant_type: "refresh_token",
+        refresh_token: "old-refresh",
+      });
+      expect(calls[1]!.headers.authorization).toBe("Bearer new-access");
+      const stored = await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connection.id } });
+      expect(decrypt(stored.encryptedToken!)).toBe("new-access");
+      expect(decrypt(stored.encryptedRefreshToken!)).toBe("new-refresh");
+      expect(stored.tokenExpiresAt!.getTime()).toBeGreaterThan(Date.now() + 60 * 60 * 1000);
+    });
+
+    it("refreshes once when two callers find the token expired at the same time", async () => {
+      const connection = await oauthConnection(new Date(Date.now() - 1000));
+      const { fetch, calls } = fetchStub([tokenRoute("new-access", "new-refresh")]);
+      vi.stubGlobal("fetch", fetch);
+
+      const tokens = await Promise.all([gitlabAccessToken(connection.id), gitlabAccessToken(connection.id)]);
+
+      expect(tokens).toEqual(["new-access", "new-access"]);
+      expect(calls.filter((call) => TOKEN_URL.test(call.url))).toHaveLength(1);
+    });
+
+    it("asks to reconnect when GitLab refuses the refresh", async () => {
+      const connection = await oauthConnection(new Date(Date.now() - 1000));
+      vi.stubGlobal(
+        "fetch",
+        fetchStub([{ method: "POST", url: TOKEN_URL, status: 400, body: { error: "invalid_grant" } }]).fetch,
+      );
+
+      await expect(gitlabAccessToken(connection.id)).rejects.toBeInstanceOf(ReconnectRequiredError);
+      const status = await request(app).get(`/api/connections/${connection.id}/status`).set("Cookie", cookie);
+      expect(status.body.status).toBe("revoked");
+    });
+
+    it("reports a GitLab outage during refresh as unreachable, not revoked", async () => {
+      const connection = await oauthConnection(new Date(Date.now() - 1000));
+      vi.stubGlobal("fetch", fetchStub([{ method: "POST", url: TOKEN_URL, status: 503 }]).fetch);
+
+      const status = await request(app).get(`/api/connections/${connection.id}/status`).set("Cookie", cookie);
+      expect(status.body.status).toBe("unreachable");
+    });
   });
 });

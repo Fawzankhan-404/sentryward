@@ -7,7 +7,7 @@ export interface Connection {
   id: string
   provider: Provider
   host: string
-  kind: "github_app" | "token"
+  kind: "github_app" | "token" | "oauth"
   accountLogin: string
   createdAt: string
   // The Sentryward user who added the connection; null once their account is gone.
@@ -96,7 +96,13 @@ export interface WebhookState {
 export function useConnections() {
   return useQuery({
     queryKey: ["connections"],
-    queryFn: () => api<{ connections: Connection[]; availableApps: Provider[] }>("/connections"),
+    queryFn: () =>
+      api<{
+        connections: Connection[]
+        availableApps: Provider[]
+        // The host each configured OAuth app signs in on.
+        oauthHosts?: Partial<Record<Provider, string>>
+      }>("/connections"),
   })
 }
 

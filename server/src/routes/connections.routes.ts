@@ -6,6 +6,8 @@ import {
   getConnection,
   githubCallback,
   githubInstall,
+  gitlabOAuthCallback,
+  gitlabOAuthStart,
   listConnections,
 } from "../controllers/connections.controller.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
@@ -19,6 +21,8 @@ connectionsRouter.use(userLimiter, requireAuth);
 // themselves.
 connectionsRouter.get("/github/install", githubInstall);
 connectionsRouter.get("/github/callback", githubCallback);
+connectionsRouter.get("/gitlab/oauth/start", gitlabOAuthStart);
+connectionsRouter.get("/gitlab/oauth/callback", gitlabOAuthCallback);
 connectionsRouter.use(requireWorkspace);
 connectionsRouter.get("/", listConnections);
 connectionsRouter.get("/:id/status", connectionStatus);

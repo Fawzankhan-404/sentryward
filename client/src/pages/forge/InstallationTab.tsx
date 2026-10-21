@@ -61,11 +61,11 @@ import {
 import { FORGE_KIND_OPTIONS, forgeKey, kindLabel } from "@/features/forge/forgeKind"
 import { ConnectionDetailsSheet } from "@/features/forge/ConnectionDetailsSheet"
 import { ConnectionStatusBadge } from "@/features/forge/ConnectionStatusBadge"
-import { PROVIDER_IDS, PROVIDERS, type TokenMethod } from "@/features/forge/providers"
+import { isProvider, offersOAuth, PROVIDER_IDS, PROVIDERS, type TokenMethod } from "@/features/forge/providers"
 import type { Provider } from "@/features/reviews/types"
 import { apiWorkspace } from "@/lib/api"
 
-// The install starts with a browser navigation, which cannot carry the
+// The install (or OAuth sign-in) starts with a browser navigation, which cannot carry the
 // workspace header, so a team workspace goes in the query instead.
 function installHref(href: string) {
   const workspace = apiWorkspace()
@@ -87,16 +87,18 @@ const RETURN_MESSAGES: Record<string, string> = {
   github_install_failed: "GitHub installation could not be completed",
   github_install_forbidden: "That GitHub installation is not one your account can access",
   github_pending_approval: "The installation is waiting for an organization owner to approve it",
+  gitlab_oauth_failed: "GitLab sign-in could not be completed",
+  gitlab_oauth_denied: "GitLab sign-in was cancelled",
 }
 
-// GitHub sends the browser back here with ?connected= or ?error=.
+// GitHub and GitLab send the browser back here with ?connected= or ?error=.
 function useReturnToast() {
   const [params, setParams] = useSearchParams()
   useEffect(() => {
     const connected = params.get("connected")
     const error = params.get("error")
     if (!connected && !error) return
-    if (connected) toast.success("GitHub connected")
+    if (connected) toast.success(`${isProvider(connected) ? PROVIDERS[connected].label : "Account"} connected`)
     if (error) toast.error(RETURN_MESSAGES[error] ?? "Connection failed")
     // Drop only the return markers so ?tab= survives.
     const next = new URLSearchParams(params)
@@ -473,10 +475,12 @@ function AddConnectionSheet({
   open,
   onOpenChange,
   availableApps,
+  oauthHosts,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   availableApps: Provider[]
+  oauthHosts: Partial<Record<Provider, string>>
 }) {
   const [providerId, setProviderId] = useState<Provider>(PROVIDER_IDS[0]!)
   const [selfHosted, setSelfHosted] = useState(false)
@@ -486,6 +490,11 @@ function AddConnectionSheet({
   // option falls back to its cloud one.
   const hosting = (selfHosted && provider.hosting.selfHosted) || provider.hosting.cloud
   const method = hosting.method
+  const oauthHost = oauthHosts[providerId]
+  const oauth =
+    method.type === "token" && availableApps.includes(providerId) && offersOAuth(provider, method, oauthHost)
+      ? method.oauth
+      : undefined
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -537,12 +546,25 @@ function AddConnectionSheet({
                 <p className="text-sm text-muted-foreground">The {method.name} is not configured on this server.</p>
               )
             ) : (
-              <TokenForm
-                key={`${providerId}-${hosting === provider.hosting.selfHosted}`}
-                provider={providerId}
-                method={method}
-                onConnected={() => handleOpenChange(false)}
-              />
+              <>
+                {oauth && (
+                  <>
+                    <Button asChild>
+                      <a href={installHref(oauth.startHref)}>Connect with {oauth.name}</a>
+                    </Button>
+                    <p className="text-sm text-muted-foreground">
+                      Signs in on {oauthHost}; comments are posted as the account that signs in. Or paste an access
+                      token instead:
+                    </p>
+                  </>
+                )}
+                <TokenForm
+                  key={`${providerId}-${hosting === provider.hosting.selfHosted}`}
+                  provider={providerId}
+                  method={method}
+                  onConnected={() => handleOpenChange(false)}
+                />
+              </>
             )}
           </section>
         </div>
@@ -556,7 +578,14 @@ export function InstallationTab() {
   const { data, isPending } = useConnections()
   const [adding, setAdding] = useState(false)
 
-  const sheet = <AddConnectionSheet open={adding} onOpenChange={setAdding} availableApps={data?.availableApps ?? []} />
+  const sheet = (
+    <AddConnectionSheet
+      open={adding}
+      onOpenChange={setAdding}
+      availableApps={data?.availableApps ?? []}
+      oauthHosts={data?.oauthHosts ?? {}}
+    />
+  )
 
   if (isPending) return null
 
