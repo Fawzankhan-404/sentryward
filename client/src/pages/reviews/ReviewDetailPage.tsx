@@ -64,6 +64,7 @@ export function ReviewDetailPage() {
   const rerun = useRerunReview()
   const cancel = useCancelReview()
   const [cancelling, setCancelling] = useState(false)
+  const [copying, setCopying] = useState(false)
   const [downloading, setDownloading] = useState(false)
 
   if (isPending) {
@@ -100,6 +101,15 @@ export function ReviewDetailPage() {
       navigate(`/reviews/${next.id}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start a new review")
+    }
+  }
+
+  async function copyMarkdown() {
+    setCopying(true)
+    try {
+      await copyToClipboard(fetchReviewMarkdown(review.id), "Markdown")
+    } finally {
+      setCopying(false)
     }
   }
 
@@ -154,12 +164,8 @@ export function ReviewDetailPage() {
               <Bot />
               Copy prompt for all findings
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => copyToClipboard(fetchReviewMarkdown(review.id), "Markdown")}
-              disabled={!result}
-            >
-              <Copy />
+            <Button variant="outline" onClick={copyMarkdown} disabled={!result || copying}>
+              {copying ? <Loader2 className="animate-spin" /> : <Copy />}
               Copy markdown
             </Button>
             <Button variant="outline" onClick={downloadMarkdown} disabled={!result || downloading}>
