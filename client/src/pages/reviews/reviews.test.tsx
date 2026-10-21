@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
 import { App } from "@/App"
 import { jsonResponse, renderWithProviders } from "@/test/renderWithProviders"
 import { mockApi } from "@/test/apiRoutes"
@@ -538,6 +539,74 @@ describe("Review detail page", () => {
       expect.stringMatching(/^In src\/app\.ts around line 11: SQL injection in search\n\nWhy it matters\./),
     )
     expect(writeText.mock.calls[0][0]).toContain("Suggested replacement for those lines:\n\ndb.query(sql, [q])")
+  })
+
+  it("keeps markdown copying pending until the clipboard write finishes", async () => {
+    const markdown = "# Sentryward review\n"
+    let resolveMarkdown!: (value: string) => void
+    const response = new Response()
+    vi.spyOn(response, "text").mockReturnValue(new Promise((resolve) => {
+      resolveMarkdown = resolve
+    }))
+    const fetchMarkdown = vi.fn(() => response)
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: detail },
+      [`GET /api/reviews/${detail.id}/markdown`]: fetchMarkdown,
+    })
+    const user = userEvent.setup()
+    let finishCopy!: () => void
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockReturnValue(
+      new Promise((resolve) => {
+        finishCopy = resolve
+      }),
+    )
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const button = await screen.findByRole("button", { name: "Copy markdown" })
+    await user.click(button)
+
+    expect(button).toBeDisabled()
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument()
+    await user.click(button)
+    expect(fetchMarkdown).toHaveBeenCalledOnce()
+    expect(writeText).not.toHaveBeenCalled()
+
+    resolveMarkdown(markdown)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdown))
+    expect(button).toBeDisabled()
+
+    finishCopy()
+    expect(await screen.findByText("Markdown copied")).toBeInTheDocument()
+    expect(button).toBeEnabled()
+    expect(button.querySelector(".animate-spin")).not.toBeInTheDocument()
+  })
+
+  it.each(["Copy", "Download"])("keeps %s markdown pending and recovers from a failed request", async (action) => {
+    const showError = vi.spyOn(toast, "error").mockReturnValue("markdown-error")
+    let rejectMarkdown!: (error: Error) => void
+    const response = new Response()
+    vi.spyOn(response, "text").mockReturnValue(new Promise((_, reject) => {
+      rejectMarkdown = reject
+    }))
+    const fetchMarkdown = vi.fn(() => response)
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: detail },
+      [`GET /api/reviews/${detail.id}/markdown`]: fetchMarkdown,
+    })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const button = await screen.findByRole("button", { name: `${action} markdown` })
+    await userEvent.click(button)
+
+    expect(button).toBeDisabled()
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument()
+    await userEvent.click(button)
+    expect(fetchMarkdown).toHaveBeenCalledOnce()
+
+    rejectMarkdown(new Error("Connection lost"))
+    await waitFor(() => expect(showError).toHaveBeenCalledWith(`Could not ${action.toLowerCase()} the markdown`))
+    expect(button).toBeEnabled()
+    expect(button.querySelector(".animate-spin")).not.toBeInTheDocument()
   })
 
   // jsdom has no object URLs and would try to navigate on an anchor click.

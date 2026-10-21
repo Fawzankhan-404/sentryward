@@ -110,6 +110,8 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Fixed
 
+- Copy markdown now shows a spinner and prevents repeated requests while copying a review.
+
 - Secrets stored under a previous `ENCRYPTION_KEY` no longer cause raw crypto
   errors or 500s. API keys are still listed, shown as "Unreadable" with a
   "Re-enter key" badge, and checking or listing models for one returns a 409
