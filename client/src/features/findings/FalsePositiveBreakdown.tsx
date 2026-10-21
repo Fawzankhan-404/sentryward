@@ -5,21 +5,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SeverityBadge } from "@/features/reviews/badges"
 import { useFindingStats } from "./api"
 import { CATEGORY_LABEL } from "./options"
-import type { FalsePositiveRow } from "./types"
+import type { FalsePositiveRow, FindingCategory } from "./types"
 
 // Below this a rate is mostly noise: one dismissal out of two reads as 50%.
 export const MIN_FOUND = 5
 // At or above this a row earns a hint at the setting that would quiet it.
 export const NOISY_RATE = 30
 
+type Hint = { text: string; to: string }
+
 interface Group<K> {
   label: string
   rows: FalsePositiveRow<K>[]
   name: (key: K) => ReactNode
-  hint: (key: K) => { text: string; to: string } | null
+  hint: (key: K) => Hint | null
 }
 
-function hintLink(hint: { text: string; to: string } | null) {
+function hintLink(hint: Hint | null) {
   if (!hint) return null
   return (
     <Link to={hint.to} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
@@ -74,13 +76,40 @@ function GroupTable<K>({ label, rows, name, hint }: Group<K>) {
   )
 }
 
-const findingTypes = "/configuration?tab=findings"
+// The config page opens a repository's own settings with ?repo=, so a repo
+// with settings of its own gets the hint where it would take effect.
+function configLink(tab: "findings" | "llm", repoId?: string) {
+  const search = new URLSearchParams({ tab })
+  if (repoId) search.set("repo", repoId)
+  return `/configuration?${search}`
+}
+
+// Like a noisy critical, noise in these needs a better prompt, not a setting:
+// turning them off would hide the findings a review exists for.
+const KEEP_CATEGORIES: ReadonlySet<FindingCategory | "other"> = new Set(["security", "bug", "logic", "reliability"])
+
+function categoryLabel(key: FindingCategory | "other") {
+  return key === "other" ? "Other" : CATEGORY_LABEL[key]
+}
+
+function categoryHint(key: FindingCategory | "other", repoId?: string): Hint | null {
+  // Categories the engine no longer emits have no setting to point at.
+  if (key === "other") return null
+  if (KEEP_CATEGORIES.has(key)) return { text: "Raise the minimum confidence", to: configLink("findings", repoId) }
+  return { text: `Drop ${categoryLabel(key)} from the reviewed categories`, to: configLink("findings", repoId) }
+}
+
+interface FalsePositiveBreakdownProps {
+  // Scopes the breakdown (and its hints) to one repository.
+  repoId?: string
+  repoName?: string | null
+}
 
 // Where the overall false-positive rate comes from, with a pointer to the
-// setting that would quiet the noisiest groups. Rides on the stats query, so
-// it costs no extra request and stays out of the way if that fails.
-export function FalsePositiveBreakdown() {
-  const { data, isPending, isError } = useFindingStats()
+// setting that would quiet the noisiest groups. Shares the stats query with
+// the cards when unscoped, and stays out of the way if it fails.
+export function FalsePositiveBreakdown({ repoId, repoName }: FalsePositiveBreakdownProps) {
+  const { data, isPending, isError } = useFindingStats(repoId)
   if (isPending || isError || data.found === 0) return null
 
   const by = data.falsePositivesBy
@@ -88,14 +117,16 @@ export function FalsePositiveBreakdown() {
     <Card aria-label="False positive breakdown" role="region">
       <CardHeader>
         <CardTitle>Where false positives come from</CardTitle>
-        <CardDescription>Findings first seen in the last {data.days} days, ignored ones included.</CardDescription>
+        <CardDescription>
+          Findings first seen in the last {data.days} days{repoName ? ` in ${repoName}` : ""}, ignored ones included.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-3">
         <GroupTable
           label="Category"
           rows={by.category}
-          name={(key) => CATEGORY_LABEL[key] ?? key}
-          hint={(key) => ({ text: `Drop ${CATEGORY_LABEL[key] ?? key} from the reviewed categories`, to: findingTypes })}
+          name={categoryLabel}
+          hint={(key) => categoryHint(key, repoId)}
         />
         <GroupTable
           label="Severity"
@@ -104,14 +135,16 @@ export function FalsePositiveBreakdown() {
           // Low-severity noise is what the confidence and severity floors are for;
           // a noisy critical needs a better prompt, not a setting.
           hint={(key) =>
-            key === "minor" || key === "info" ? { text: "Raise the minimum confidence or severity floor", to: findingTypes } : null
+            key === "minor" || key === "info"
+              ? { text: "Raise the minimum confidence or severity floor", to: configLink("findings", repoId) }
+              : null
           }
         />
         <GroupTable
           label="Model"
           rows={by.model}
-          name={(key) => (key === null ? <span className="text-muted-foreground">Unknown</span> : <code className="text-xs">{key}</code>)}
-          hint={(key) => (key === null ? null : { text: "Try another model", to: "/configuration?tab=llm" })}
+          name={(key) => (key === null ? <span className="text-muted-foreground">Analyzer or unrecorded</span> : <code className="text-xs">{key}</code>)}
+          hint={(key) => (key === null ? null : { text: "Try another model", to: configLink("llm", repoId) })}
         />
       </CardContent>
     </Card>

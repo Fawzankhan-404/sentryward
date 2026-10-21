@@ -394,7 +394,7 @@ describe("runReview", () => {
       Object.fromEntries(requests.map((request) => [request.schemaName, request.model]));
 
     const split = fakeModel(respond);
-    await runReview(
+    const result = await runReview(
       {
         changeSet,
         config: config({
@@ -408,6 +408,8 @@ describe("runReview", () => {
       walkthrough: "anthropic/claude-haiku-5-5",
       verification: "anthropic/claude-opus-5-5",
     });
+    // Credited to the pass that raised it, not the verifier that confirmed it.
+    expect(result.findings.map((finding) => finding.model)).toEqual(["anthropic/claude-sonnet-5-5"]);
 
     const shared = fakeModel(respond);
     await runReview({ changeSet, config: config() }, { generate: shared.generate });

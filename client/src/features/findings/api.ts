@@ -53,10 +53,12 @@ export function useFindings(params: FindingQuery = {}) {
 }
 
 // Under the "findings" key, so ignoring or reopening one refreshes the cards too.
-export function useFindingStats() {
+// Workspace-wide unless a repository is given.
+export function useFindingStats(repoId?: string) {
+  const query = findingSearch({ repoId })
   return useQuery({
-    queryKey: ["findings", "stats"],
-    queryFn: () => api<FindingStats>("/findings/stats"),
+    queryKey: ["findings", "stats", repoId ?? null],
+    queryFn: () => api<FindingStats>(`/findings/stats${query ? `?${query}` : ""}`),
   })
 }
 

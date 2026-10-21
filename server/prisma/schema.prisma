@@ -312,6 +312,11 @@ model Finding {
   changeTitle  String          @map("change_title")
   // Forge login of whoever opened the change; unknown for backfilled rows.
   author       String?
+  // The model of the review pass that raised it, for the false-positive
+  // breakdown. Null for tool and rule findings and rows nothing could be
+  // backfilled for. Frozen with lastJobId while ignored, so a dismissal stays
+  // with the model and run that were dismissed.
+  model        String?
   lastJobId    String?         @map("last_job_id") @db.Uuid
   firstSeenAt  DateTime        @default(now()) @map("first_seen_at") @db.Timestamptz
   lastSeenAt   DateTime        @default(now()) @map("last_seen_at") @db.Timestamptz

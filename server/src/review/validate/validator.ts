@@ -5,6 +5,9 @@ import { isAddedLine, type ChangedFile, type ChangeSet, type Finding, type ToolA
 import { atLeast, severityRank } from "../core/severity.ts";
 import type { ModelFinding } from "../llm/schemas.ts";
 
+// A model finding plus the model of the pass that produced it.
+export type TaggedFinding = ModelFinding & { model?: string };
+
 // How far a reported line may be from a changed line and still be snapped to
 // it. Models are occasionally off by a line or two; further than this, the
 // finding is about something else.
@@ -101,7 +104,7 @@ export function stronger(existing: Finding, candidate: Finding): Finding {
 }
 
 export function validateFindings(
-  raw: ModelFinding[],
+  raw: TaggedFinding[],
   changeSet: ChangeSet,
   reviewed: ChangedFile[],
   config: Config,
@@ -192,6 +195,7 @@ export function validateFindings(
       evidenceFiles: candidate.evidenceFiles.filter((path) => path !== file.path),
       source: "llm",
       fingerprint: fingerprint({ file: file.path, category: candidate.category, kind, title }),
+      ...(candidate.model ? { model: candidate.model } : {}),
       bucket: bucketFor({ file: file.path, startLine: start, kind }, changeSet),
     };
 

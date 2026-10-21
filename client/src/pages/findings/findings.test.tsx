@@ -92,6 +92,7 @@ describe("Findings page", () => {
         falsePositivesBy: {
           category: [
             { key: "style", found: 8, falsePositives: 4, rate: 50 },
+            { key: "bug", found: 7, falsePositives: 3, rate: 43 },
             { key: "security", found: 6, falsePositives: 0, rate: 0 },
             { key: "docs", found: 2, falsePositives: 2, rate: 100 },
           ],
@@ -114,6 +115,10 @@ describe("Findings page", () => {
       "/configuration?tab=findings",
     )
     expect(within(within(byCategory).getByText("Security").closest("tr")!).queryByRole("link")).toBeNull()
+    // Noise in a category a review exists for points at confidence, not at dropping it.
+    const bug = within(byCategory).getByText("Bug").closest("tr")!
+    expect(within(bug).getByRole("link", { name: "Raise the minimum confidence" })).toBeInTheDocument()
+    expect(within(bug).queryByRole("link", { name: /Drop/ })).toBeNull()
     // Two findings is too few to call docs noisy, whatever the rate says.
     expect(within(byCategory).queryByText("Docs")).toBeNull()
     expect(screen.getByText("1 row with fewer than 5 findings hidden")).toBeInTheDocument()
@@ -124,8 +129,45 @@ describe("Findings page", () => {
     expect(within(bySeverity).getByRole("link", { name: "Raise the minimum confidence or severity floor" })).toBeInTheDocument()
 
     const byModel = screen.getByRole("table", { name: "False positives by model" })
-    expect(within(byModel).getByText("Unknown")).toBeInTheDocument()
+    expect(within(byModel).getByText("Analyzer or unrecorded")).toBeInTheDocument()
     expect(within(byModel).queryByRole("link")).toBeNull()
+  })
+
+  it("scopes the breakdown and its hints to the selected repository", async () => {
+    const repo = (id: string, fullPath: string) => ({ id, fullPath, provider: "gitlab", host: "gitlab.com", enabled: true })
+    const scoped: FindingStats = {
+      ...stats,
+      found: 6,
+      falsePositivesBy: {
+        category: [{ key: "style", found: 6, falsePositives: 3, rate: 50 }],
+        severity: [],
+        model: [{ key: "openai/gpt-5", found: 6, falsePositives: 3, rate: 50 }],
+      },
+    }
+    mockApi({
+      "GET /api/repos": { repos: [repo("r1", "team/web"), repo("r2", "team/api")] },
+      "GET /api/findings/stats": stats,
+      "GET /api/findings/stats?repoId=r2": scoped,
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?repoId=r2&state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+    await screen.findByRole("table", { name: "False positives by category" })
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(await screen.findByRole("combobox", { name: "Repository" }))
+    await userEvent.click(screen.getByRole("option", { name: "team/api" }))
+
+    const region = await screen.findByRole("region", { name: "False positive breakdown" })
+    await within(region).findByText(/in team\/api/)
+    expect(within(region).getByRole("link", { name: "Drop Style from the reviewed categories" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=findings&repo=r2",
+    )
+    expect(within(region).getByRole("link", { name: "Try another model" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=llm&repo=r2",
+    )
   })
 
   it("lists every state once the state filter is removed", async () => {

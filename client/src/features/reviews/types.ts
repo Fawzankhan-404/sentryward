@@ -43,6 +43,9 @@ export interface Finding {
   source: "llm" | "tool" | "rule"
   tool?: string
   fingerprint: string
+  // The model of the review pass that raised it; absent for tool and rule
+  // findings and older results.
+  model?: string
   bucket: Bucket
 }
 

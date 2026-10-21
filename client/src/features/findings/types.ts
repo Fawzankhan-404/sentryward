@@ -59,10 +59,11 @@ export interface FindingStats {
   falsePositiveRate: number | null
   // The same population as `found`, grouped. Only groups with findings appear.
   falsePositivesBy: {
-    category: FalsePositiveRow<FindingCategory>[]
+    // "other" collects stored categories the engine no longer emits.
+    category: FalsePositiveRow<FindingCategory | "other">[]
     severity: FalsePositiveRow<Severity>[]
-    // The model the last run reporting the finding was configured with; null
-    // when that run is gone.
+    // The model of the review pass that raised each finding; null for tool and
+    // rule findings, and rows from before the model was recorded.
     model: FalsePositiveRow<string | null>[]
   }
 }

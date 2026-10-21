@@ -71,6 +71,20 @@ describe("syncFindings", () => {
     expect(stored[0]!.changeTitle).toBe(base.change.title);
   });
 
+  it("records the model that raised each finding, and keeps it on ignored rows", async () => {
+    const first = await sync(base);
+    const [dismissed, kept] = await rows();
+    expect(dismissed!.model).toBe(base.findings[0]!.model);
+    expect(dismissed!.model).toBeTruthy();
+    await prisma.finding.update({ where: { id: dismissed!.id }, data: { state: "ignored", ignoreReason: "false_positive" } });
+
+    // A later run on another model repeats both findings: only the open one
+    // moves to it, so the dismissal stays with the model that was dismissed.
+    const second = await sync({ ...base, findings: base.findings.map((f) => ({ ...f, model: "openai/gpt-x" })) });
+    expect(await byTitle(dismissed!.title)).toMatchObject({ model: dismissed!.model, lastJobId: first, state: "ignored" });
+    expect(await byTitle(kept!.title)).toMatchObject({ model: "openai/gpt-x", lastJobId: second });
+  });
+
   it("resolves a finding a later run no longer reports, and reopens it if it returns", async () => {
     await sync(base);
     const [gone, ...rest] = base.findings;
@@ -384,21 +398,30 @@ describe("GET /api/findings/stats", () => {
       ]);
     });
 
-    it("groups by the model of the run that last reported each finding", async () => {
+    it("groups by the model that raised each finding, whatever happened to its run", async () => {
       const { found } = await seed();
-      await prisma.reviewJob.updateMany({
-        data: { resolvedConfig: { config: { llm: { model: "anthropic/claude-sonnet-5-5" } } } },
-      });
+      const model = base.findings[0]!.model;
+      // A false positive from a tool, or a row nothing could be backfilled for.
+      // Rows share titles across the two changes, so pick by state, not order.
+      const analyzer = (await rows()).find((row) => row.ignoreReason === "false_positive" && row.category === "style");
+      await prisma.finding.update({ where: { id: analyzer!.id }, data: { model: null } });
+      await prisma.reviewJob.deleteMany();
       const res = await request(app).get("/api/findings/stats").set("Cookie", cookie);
       expect(res.body.falsePositivesBy.model).toEqual([
-        { key: "anthropic/claude-sonnet-5-5", found, falsePositives: 2, rate: Math.round((2 / found) * 100) },
+        { key: null, found: 1, falsePositives: 1, rate: 100 },
+        { key: model, found: found - 1, falsePositives: 1, rate: Math.round((1 / (found - 1)) * 100) },
       ]);
+    });
 
-      await prisma.reviewJob.deleteMany();
-      const orphaned = await request(app).get("/api/findings/stats").set("Cookie", cookie);
-      expect(orphaned.body.falsePositivesBy.model).toEqual([
-        { key: null, found, falsePositives: 2, rate: Math.round((2 / found) * 100) },
-      ]);
+    it("groups categories it does not know under other, so the rows add up to found", async () => {
+      const { found } = await seed();
+      const legacy = (await rows()).find((row) => row.state === "open" && row.category === "style");
+      await prisma.finding.update({ where: { id: legacy!.id }, data: { category: "naming" } });
+      const res = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+      const categories = res.body.falsePositivesBy.category as { key: string; found: number }[];
+      expect(categories).toContainEqual({ key: "other", found: 1, falsePositives: 0, rate: 0 });
+      expect(categories.reduce((sum, row) => sum + row.found, 0)).toBe(found);
+      expect(res.body.falsePositives).toBe(2);
     });
 
     it("counts only the workspace's findings, narrowed by repository", async () => {

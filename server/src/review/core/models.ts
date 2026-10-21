@@ -123,6 +123,9 @@ export const findingSchema = z.object({
   tool: z.string().optional(),
   ruleId: z.string().optional(),
   fingerprint: z.string(),
+  // The model of the review pass that raised it (not the verifier's). Absent
+  // for tool and rule findings, and in results stored before it was recorded.
+  model: z.string().optional(),
   // Decided once by core/buckets.ts so no surface can disagree about it.
   bucket: bucketSchema,
 });

@@ -58,14 +58,22 @@ const SORT_ORDER: Record<ListQuery["sort"], (dir: Dir) => Prisma.FindingOrderByW
 
 type BreakdownRow<K> = { key: K; found: number; falsePositives: number; rate: number | null };
 
+function percent(part: number, whole: number) {
+  return whole ? Math.round((part / whole) * 100) : null;
+}
+
 function breakdownRow<K>(key: K, found: number, falsePositives: number): BreakdownRow<K> {
-  return { key, found, falsePositives, rate: found ? Math.round((falsePositives / found) * 100) : null };
+  return { key, found, falsePositives, rate: percent(falsePositives, found) };
 }
 
 // Noisiest first, so the rows worth acting on lead.
 function byRate<K>(a: BreakdownRow<K>, b: BreakdownRow<K>) {
   return (b.rate ?? -1) - (a.rate ?? -1) || b.found - a.found;
 }
+
+// findings.category is a plain string, so a category the engine no longer
+// emits lands here instead of vanishing from the totals.
+const OTHER_CATEGORY = "other";
 
 // "#12" (GitHub) and "!12" (GitLab) are how people write change numbers.
 const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
@@ -108,8 +116,7 @@ export async function getFindingStats(req: Request, res: Response) {
   const { repoId, days } = findingStatsQuerySchema.parse(req.query);
   const since = new Date(Date.now() - days * 86_400_000);
   const scope = { ...ownedBy(req.workspaceId!), ...(repoId ? { repositoryId: repoId } : {}) };
-  const workspaceId = req.workspaceId!;
-  const [open, recent, staleOpen, resolvedRecently, found, falsePositives, byKind, byModel] = await prisma.$transaction([
+  const [open, recent, staleOpen, resolvedRecently, byKind] = await prisma.$transaction([
     prisma.finding.groupBy({
       by: ["severity"],
       where: { ...scope, state: "open" },
@@ -129,74 +136,59 @@ export async function getFindingStats(req: Request, res: Response) {
       where: { ...scope, state: "resolved", resolvedAt: { gte: since } },
       select: { firstSeenAt: true, resolvedAt: true },
     }),
-    // Unlike the resolution rate, this counts ignored findings: dismissing one
-    // as a false positive is exactly what it measures.
-    prisma.finding.count({ where: { ...scope, firstSeenAt: { gte: since } } }),
-    prisma.finding.count({
-      where: { ...scope, firstSeenAt: { gte: since }, state: "ignored", ignoreReason: "false_positive" },
-    }),
-    // Same population as `found`, split so category and severity can both be
-    // folded from one query.
+    // Everything first seen in the period. Unlike the resolution rate, this
+    // counts ignored findings: dismissing one as a false positive is exactly
+    // what the false-positive rate measures. Split so the totals and every
+    // breakdown fold from one query.
     prisma.finding.groupBy({
-      by: ["category", "severity", "state", "ignoreReason"],
+      by: ["category", "severity", "model", "state", "ignoreReason"],
       where: { ...scope, firstSeenAt: { gte: since } },
       orderBy: { category: "asc" },
       _count: { _all: true },
     }),
-    // The model is the one the last run reporting the finding was configured
-    // with, read from its stored config rather than a column on findings. A
-    // deleted run (or one stored before configs were) groups under null.
-    prisma.$queryRaw<{ model: string | null; found: number; false_positives: number }[]>`
-      SELECT j.resolved_config #>> '{config,llm,model}' AS model,
-        count(*)::int AS found,
-        (count(*) FILTER (WHERE f.state = 'ignored' AND f.ignore_reason = 'false_positive'))::int AS false_positives
-      FROM findings f
-      JOIN repositories r ON r.id = f.repository_id
-      JOIN forge_connections c ON c.id = r.connection_id
-      LEFT JOIN review_jobs j ON j.id = f.last_job_id
-      WHERE c.workspace_id = ${workspaceId}::uuid
-        AND (${repoId ?? null}::uuid IS NULL OR f.repository_id = ${repoId ?? null}::uuid)
-        AND f.first_seen_at >= ${since}
-      GROUP BY 1
-    `,
   ]);
   const count = (row: { _count?: unknown }) => (row._count as { _all: number })._all;
+  const isFalsePositive = (row: (typeof byKind)[number]) => row.state === "ignored" && row.ignoreReason === "false_positive";
   const openBySeverity = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<(typeof SEVERITIES)[number], number>;
   for (const row of open) {
     if (row.severity in openBySeverity) openBySeverity[row.severity as keyof typeof openBySeverity] = count(row);
   }
   const total = recent.reduce((sum, row) => sum + count(row), 0);
   const resolved = recent.filter((row) => row.state === "resolved").reduce((sum, row) => sum + count(row), 0);
-  const tally = <K extends string>(keys: readonly K[], keyOf: (row: (typeof byKind)[number]) => K) => {
-    const totals = new Map(keys.map((k) => [k, { found: 0, falsePositives: 0 }]));
+  const found = byKind.reduce((sum, row) => sum + count(row), 0);
+  const falsePositives = byKind.filter(isFalsePositive).reduce((sum, row) => sum + count(row), 0);
+  // Groups with no findings are left out; how few is too few to show is the
+  // dashboard's call.
+  const tally = <K>(keyOf: (row: (typeof byKind)[number]) => K) => {
+    const totals = new Map<K, { found: number; falsePositives: number }>();
     for (const row of byKind) {
-      const entry = totals.get(keyOf(row));
-      if (!entry) continue;
+      const key = keyOf(row);
+      const entry = totals.get(key) ?? { found: 0, falsePositives: 0 };
       entry.found += count(row);
-      if (row.state === "ignored" && row.ignoreReason === "false_positive") entry.falsePositives += count(row);
+      if (isFalsePositive(row)) entry.falsePositives += count(row);
+      totals.set(key, entry);
     }
-    return [...totals]
-      .filter(([, t]) => t.found > 0)
-      .map(([key, t]) => breakdownRow(key, t.found, t.falsePositives));
+    return [...totals].map(([key, t]) => breakdownRow(key, t.found, t.falsePositives));
   };
+  const severityOrder = (row: BreakdownRow<string>) => SEVERITIES.indexOf(row.key as (typeof SEVERITIES)[number]);
   res.json({
     days,
     open: open.reduce((sum, row) => sum + count(row), 0),
     openBySeverity,
     resolved,
     total,
-    resolutionRate: total ? Math.round((resolved / total) * 100) : null,
+    resolutionRate: percent(resolved, total),
     staleOpen,
     medianTimeToResolve: median(resolvedRecently.map((f) => f.resolvedAt!.getTime() - f.firstSeenAt.getTime())),
     falsePositives,
     found,
-    falsePositiveRate: found ? Math.round((falsePositives / found) * 100) : null,
-    // Every group with at least one finding; how few is too few to show is the
-    // dashboard's call.
+    falsePositiveRate: percent(falsePositives, found),
     falsePositivesBy: {
-      category: tally(CATEGORIES, (row) => row.category as Category).sort(byRate),
-      severity: tally(SEVERITIES, (row) => row.severity),
-      model: byModel.map((row) => breakdownRow(row.model, row.found, row.false_positives)).sort(byRate),
+      category: tally((row) => (CATEGORIES.includes(row.category as Category) ? row.category : OTHER_CATEGORY)).sort(byRate),
+      severity: tally((row) => row.severity).sort((a, b) => severityOrder(a) - severityOrder(b)),
+      // The model of the review pass that raised each finding; null for tool
+      // and rule findings and rows from before it was recorded.
+      model: tally((row) => row.model).sort(byRate),
     },
   });
 }

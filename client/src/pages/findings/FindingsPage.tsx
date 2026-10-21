@@ -116,7 +116,7 @@ export function FindingsPage() {
         description="Issues raised across your reviews, tracked until they are resolved or ignored."
       />
       <FindingStatsStrip />
-      <FalsePositiveBreakdown />
+      <FalsePositiveBreakdown repoId={params.repoId} repoName={selectedLabel(repo, repoOptions)} />
       <FilterToolbar>
         <ActiveFilterChips filters={activeFilters} />
         <FilterPopover active={filtering} onClear={clearFilters}>

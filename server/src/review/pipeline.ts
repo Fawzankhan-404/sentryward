@@ -21,9 +21,8 @@ import { classifyFiles } from "./context/ignore.ts";
 import { MAX_MANIFEST_CHARS, MAX_REJECTED_CHARS, reviewSystemPrompt, type ManifestEntry } from "./llm/prompt.ts";
 import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
-import type { ModelFinding } from "./llm/schemas.ts";
 import { generateWalkthrough, type WalkthroughIssues } from "./llm/walkthrough.ts";
-import { compareFindings, validateFindings, validateToolFindings, type DropReason } from "./validate/validator.ts";
+import { compareFindings, validateFindings, validateToolFindings, type DropReason, type TaggedFinding } from "./validate/validator.ts";
 import { verifyFindings } from "./validate/verify.ts";
 
 export interface ReviewDeps {
@@ -198,7 +197,7 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
       });
   }
 
-  const raw: ModelFinding[] = [];
+  const raw: TaggedFinding[] = [];
   let failedPasses = 0;
   const outcomes = await mapLimit(chunks, deps.concurrency ?? 3, async (chunk) => {
     try {
@@ -212,7 +211,8 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
   });
   for (const outcome of outcomes) {
     if (outcome.review) {
-      raw.push(...outcome.review.findings);
+      const { model } = outcome.review.usage;
+      raw.push(...outcome.review.findings.map((finding) => ({ ...finding, model })));
       usage.push(outcome.review.usage);
       continue;
     }

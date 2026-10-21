@@ -96,18 +96,23 @@ export async function syncFindings({ repositoryId, number, jobId, author, result
         category: finding.category,
         kind: finding.kind,
         changeTitle: result.change.title,
-        lastJobId: jobId,
         lastSeenAt: now,
         // Backfilled rows have no author; keep a known one if the forge stops saying.
         ...(author ? { author } : {}),
       };
+      const source = { model: finding.model ?? null, lastJobId: jobId };
       const row = known.get(finding.fingerprint);
       if (!row) {
-        await tx.finding.create({ data: { repositoryId, number, fingerprint: finding.fingerprint, ...snapshot } });
+        await tx.finding.create({ data: { repositoryId, number, fingerprint: finding.fingerprint, ...snapshot, ...source } });
       } else if (row.state === "resolved") {
-        await tx.finding.update({ where: { id: row.id }, data: { ...snapshot, state: "open", resolvedAt: null } });
-      } else {
+        await tx.finding.update({ where: { id: row.id }, data: { ...snapshot, ...source, state: "open", resolvedAt: null } });
+      } else if (row.state === "ignored") {
+        // The dismissal belongs to the run (and model) the user dismissed: a
+        // later model repeating the finding must not take the blame for it,
+        // and the details sheet keeps showing what was dismissed.
         await tx.finding.update({ where: { id: row.id }, data: snapshot });
+      } else {
+        await tx.finding.update({ where: { id: row.id }, data: { ...snapshot, ...source } });
       }
     }
 
