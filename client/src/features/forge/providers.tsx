@@ -19,9 +19,12 @@ export type ConnectMethod =
   // provider in availableApps.
   | { type: "app"; name: string; installHref: string }
   // A pasted token, posted to /connections/:provider. A fixed host hides the
-  // host field. Extra fields are sent alongside host and token.
+  // host field. Extra fields are sent alongside host and token. oauth adds a
+  // sign-in redirect above the form when the server has an OAuth app for this
+  // hosting option's host.
   | {
       type: "token"
+      oauth?: { name: string; startHref: string }
       fixedHost?: string
       hostPlaceholder: string
       tokenPlaceholder: string
@@ -57,6 +60,8 @@ const GITLAB_TOKEN_HINT = (
     A personal, project or group token with the <code>api</code> scope and at least Developer access.
   </>
 )
+
+const GITLAB_OAUTH = { name: "GitLab", startHref: "/api/connections/gitlab/oauth/start" }
 
 export const PROVIDERS: Record<Provider, ProviderDefinition> = {
   github: {
@@ -96,20 +101,39 @@ export const PROVIDERS: Record<Provider, ProviderDefinition> = {
       return `${forgeOrigin(host)}/${project}/-/blob/${sha}/${path}${lines}`
     },
     icon: GitLabIcon,
-    kindLabel: { token: "GitLab token" },
+    kindLabel: { token: "GitLab token", oauth: "GitLab OAuth" },
     hosting: {
       cloud: {
         label: "GitLab.com",
         hint: GITLAB_TOKEN_HINT,
-        method: { type: "token", fixedHost: "gitlab.com", hostPlaceholder: "gitlab.com", tokenPlaceholder: "glpat-..." },
+        method: {
+          type: "token",
+          oauth: GITLAB_OAUTH,
+          fixedHost: "gitlab.com",
+          hostPlaceholder: "gitlab.com",
+          tokenPlaceholder: "glpat-...",
+        },
       },
       selfHosted: {
         label: "Self-hosted",
         hint: GITLAB_TOKEN_HINT,
-        method: { type: "token", hostPlaceholder: "gitlab.example.com", tokenPlaceholder: "glpat-..." },
+        method: { type: "token", oauth: GITLAB_OAUTH, hostPlaceholder: "gitlab.example.com", tokenPlaceholder: "glpat-..." },
       },
     },
   },
 }
 
+// The server runs one OAuth app per forge, for one host: offer it on the cloud
+// option when that is the cloud host, otherwise on the self-hosted one.
+export function offersOAuth(provider: ProviderDefinition, method: TokenMethod, oauthHost: string | undefined) {
+  if (!method.oauth || !oauthHost) return false
+  const cloudMethod = provider.hosting.cloud.method
+  const cloudHost = cloudMethod.type === "token" ? cloudMethod.fixedHost : undefined
+  return method.fixedHost ? oauthHost === method.fixedHost : oauthHost !== cloudHost
+}
+
 export const PROVIDER_IDS = Object.keys(PROVIDERS) as Provider[]
+
+export function isProvider(id: string): id is Provider {
+  return Object.hasOwn(PROVIDERS, id)
+}

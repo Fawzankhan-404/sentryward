@@ -34,6 +34,7 @@ model User {
   memberships        Membership[]
   connectionsCreated ForgeConnection[]
   invitesSent        Invite[]
+  oauthStates        OAuthState[]
 
   @@map("users")
 }
@@ -70,6 +71,7 @@ model Workspace {
   connections    ForgeConnection[]
   llmCredentials LlmCredential[]
   invites        Invite[]
+  oauthStates    OAuthState[]
 
   @@map("workspaces")
 }
@@ -130,6 +132,9 @@ enum ForgeProvider {
 enum ConnectionKind {
   github_app
   token
+  // GitLab OAuth: the access token in encrypted_token expires and is renewed
+  // with encrypted_refresh_token.
+  oauth
 
   @@map("connection_kind")
 }
@@ -195,18 +200,21 @@ enum IgnoreReason {
 }
 
 model ForgeConnection {
-  id             String         @id @default(uuid()) @db.Uuid
-  workspaceId    String         @map("workspace_id") @db.Uuid
+  id                    String         @id @default(uuid()) @db.Uuid
+  workspaceId           String         @map("workspace_id") @db.Uuid
   // Who connected it, for display; the workspace owns it.
-  createdById    String?        @map("created_by_id") @db.Uuid
-  provider       ForgeProvider
-  host           String
-  kind           ConnectionKind
-  installationId String?        @map("installation_id")
-  encryptedToken String?        @map("encrypted_token")
-  accountLogin   String         @map("account_login")
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  createdById           String?        @map("created_by_id") @db.Uuid
+  provider              ForgeProvider
+  host                  String
+  kind                  ConnectionKind
+  installationId        String?        @map("installation_id")
+  encryptedToken        String?        @map("encrypted_token")
+  // OAuth connections only. GitLab rotates the refresh token on every use.
+  encryptedRefreshToken String?        @map("encrypted_refresh_token")
+  tokenExpiresAt        DateTime?      @map("token_expires_at") @db.Timestamptz
+  accountLogin          String         @map("account_login")
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -214,6 +222,24 @@ model ForgeConnection {
 
   @@index([workspaceId])
   @@map("forge_connections")
+}
+
+// An OAuth round trip in progress. The id is the `state` sent to the forge; the
+// callback deletes the row to use it, so a state works once.
+model OAuthState {
+  id           String   @id
+  userId       String   @map("user_id") @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  host         String
+  // PKCE code verifier, sent with the code exchange.
+  codeVerifier String   @map("code_verifier")
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("oauth_states")
 }
 
 model Repository {

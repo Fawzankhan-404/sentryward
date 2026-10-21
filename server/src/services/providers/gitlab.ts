@@ -3,6 +3,7 @@ import { parseJson, REVIEW_COMMAND, safeEqual } from "../../lib/webhook.ts";
 import type { ForgeConnection } from "../../generated/prisma/client.ts";
 import { GitLabAdapter } from "../../review/forge/gitlab.ts";
 import { gitlabConnectSchema } from "../../schemas/connections.schema.ts";
+import { gitlabAccessToken, gitlabOAuthConfigured } from "../gitlabOAuth.ts";
 import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import type { ProviderDefinition } from "./types.ts";
 import { decryptToken } from "./token.ts";
@@ -25,6 +26,15 @@ interface GitLabPayload {
 }
 
 function adapterFor(connection: ForgeConnection): GitLabAdapter {
+  if (connection.kind === "oauth") {
+    return new GitLabAdapter({
+      host: connection.host,
+      // By id, not from this snapshot: the stored token may have been refreshed since.
+      token: () => gitlabAccessToken(connection.id),
+      oauth: true,
+      selfLogin: connection.accountLogin,
+    });
+  }
   const encryptedToken = connection.encryptedToken;
   if (!encryptedToken) {
     throw new HttpError(500, "GitLab connection has no token");
@@ -47,6 +57,10 @@ export const gitlabProvider: ProviderDefinition = {
     schema: gitlabConnectSchema,
     account: (host, token) => new GitLabAdapter({ host, token: async () => token }).currentAccount(),
   },
+
+  // GitLab has no app install; this is the OAuth connect flow. Events still
+  // arrive through a hook registered on each repository.
+  appAvailable: gitlabOAuthConfigured,
 
   repoWebhook: {
     verify: (header, _raw, secret) => safeEqual(header("x-gitlab-token") ?? "", secret),

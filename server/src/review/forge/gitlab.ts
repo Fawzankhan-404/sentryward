@@ -35,6 +35,9 @@ import {
 export interface GitLabAdapterOptions {
   host: string;
   token: () => Promise<string>;
+  // OAuth access tokens go in Authorization; personal, project and group
+  // tokens in PRIVATE-TOKEN.
+  oauth?: boolean;
   // The username Sentryward posts as (the token's user), to find its own notes.
   selfLogin?: string;
   fetch?: FetchLike;
@@ -185,7 +188,10 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     this.http = new ForgeHttp({
       baseUrl: `${hostOrigin(options.host)}/api/v4`,
       fetch: options.fetch,
-      headers: async () => ({ "PRIVATE-TOKEN": await options.token() }),
+      headers: async (): Promise<Record<string, string>> =>
+        options.oauth
+          ? { Authorization: `Bearer ${await options.token()}` }
+          : { "PRIVATE-TOKEN": await options.token() },
     });
   }
 

@@ -10,6 +10,17 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- GitLab can be connected through OAuth ("Connect with GitLab") as well as
+  with an access token, on GitLab.com or one self-hosted instance per
+  deployment, configured with `GITLAB_OAUTH_HOST`, `GITLAB_OAUTH_CLIENT_ID`
+  and `GITLAB_OAUTH_CLIENT_SECRET`. The flow uses PKCE and a single-use state.
+  The access and refresh tokens are stored encrypted, and the access token is
+  refreshed shortly before it expires, one refresh at a time per connection
+  since GitLab rotates the refresh token on each use. If GitLab refuses a
+  refresh, the connection shows as inactive and reviews fail asking you to
+  reconnect. An OAuth connection posts as the person who signed in. Backed by
+  `GET /api/connections/gitlab/oauth/start` and
+  `GET /api/connections/gitlab/oauth/callback`; requires a database migration.
 - The findings page breaks the false-positive rate down by category, severity
   and model, so it shows where reviews are noisy. Groups with fewer than 5
   findings are hidden, and groups at 30% or more link to the setting that would

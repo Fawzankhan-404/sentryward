@@ -58,6 +58,15 @@ export const githubInstallSchema = z.object({
   workspace: z.string().optional(),
 });
 
+export const gitlabOAuthStartSchema = githubInstallSchema;
+
+// GitLab sends error= instead of code= when the user cancels.
+export const gitlabOAuthCallbackSchema = z.object({
+  state: z.string().min(1),
+  code: z.string().optional(),
+  error: z.string().optional(),
+});
+
 export const githubCallbackSchema = z.object({
   installation_id: z.string().regex(/^\d+$/).optional(),
   setup_action: z.string().optional(),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeHost } from "../schemas/connections.schema.ts";
 
 // Docker Compose passes an unset variable as "", which means "not configured".
 const optionalString = <T extends z.ZodType>(schema: T) =>
@@ -25,6 +26,18 @@ const envSchema = z.object({
   GITHUB_APP_CLIENT_ID: z.string().optional(),
   GITHUB_APP_CLIENT_SECRET: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  // GitLab OAuth application (optional; without it GitLab connects with tokens
+  // only). One instance per deployment: gitlab.com or a self-hosted host.
+  GITLAB_OAUTH_HOST: optionalString(z.string()).transform((value, ctx) => {
+    const host = normalizeHost(value ?? "gitlab.com");
+    if (!host) {
+      ctx.addIssue({ code: "custom", message: "GITLAB_OAUTH_HOST must be a host such as gitlab.example.com" });
+      return z.NEVER;
+    }
+    return host;
+  }),
+  GITLAB_OAUTH_CLIENT_ID: optionalString(z.string()),
+  GITLAB_OAUTH_CLIENT_SECRET: optionalString(z.string()),
   // Where forges can reach this API, for the webhook URL registered on GitLab.
   API_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
   // Server-wide model keys, used when the repository owner has not stored one.

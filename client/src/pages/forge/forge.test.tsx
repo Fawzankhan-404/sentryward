@@ -90,6 +90,43 @@ describe("Connections page", () => {
     expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/connections/gitlab"))).toBe(false)
   })
 
+  it("offers GitLab OAuth on the option matching the server's OAuth host", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [], availableApps: ["gitlab"], oauthHosts: { gitlab: "gitlab.acme.com" } },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+
+    await openAddConnection()
+    await chooseProvider("GitLab")
+    expect(screen.queryByRole("link", { name: "Connect with GitLab" })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Self-hosted" }))
+    expect(screen.getByRole("link", { name: "Connect with GitLab" })).toHaveAttribute(
+      "href",
+      "/api/connections/gitlab/oauth/start",
+    )
+    expect(screen.getByText(/Signs in on gitlab\.acme\.com/)).toBeInTheDocument()
+    expect(screen.getByLabelText("Access token")).toBeInTheDocument()
+  })
+
+  it("offers GitLab OAuth on GitLab.com and hides it when the server has no OAuth app", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [], availableApps: ["gitlab"], oauthHosts: { gitlab: "gitlab.com" } },
+    })
+    const { unmount } = renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+
+    await openAddConnection()
+    await chooseProvider("GitLab")
+    expect(screen.getByRole("link", { name: "Connect with GitLab" })).toBeInTheDocument()
+    unmount()
+
+    mockApi({ "GET /api/connections": { connections: [], availableApps: [] } })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+    await openAddConnection()
+    await chooseProvider("GitLab")
+    expect(screen.queryByRole("link", { name: "Connect with GitLab" })).not.toBeInTheDocument()
+  })
+
   it("asks self-hosted GitLab for a host and shows a field error from the server", async () => {
     mockApi({
       "GET /api/connections": { connections: [], availableApps: ["github"] },
@@ -338,7 +375,7 @@ describe("Connections page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Filters" }))
     await userEvent.click(await screen.findByRole("combobox", { name: "Forge" }))
     const options = screen.getAllByRole("option").map((option) => option.textContent)
-    expect(options).toEqual(["All forges", "GitHub App", "GitHub token", "GitLab token"])
+    expect(options).toEqual(["All forges", "GitHub App", "GitHub token", "GitLab token", "GitLab OAuth"])
     expect(screen.getByRole("option", { name: "GitHub App" }).querySelector("svg")).toBeInTheDocument()
   })
 
@@ -442,6 +479,23 @@ describe("Repositories page", () => {
 
     expect(await screen.findByText("GitHub connected")).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Installation" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("toasts the forge that sent the browser back", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: ["gitlab"] },
+      "GET /api/connections/c1/status": { status: "active" },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation&connected=gitlab" })
+
+    expect(await screen.findByText("GitLab connected")).toBeInTheDocument()
+  })
+
+  it("explains a cancelled GitLab sign-in", async () => {
+    mockApi({ "GET /api/connections": { connections: [], availableApps: ["gitlab"] } })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation&error=gitlab_oauth_denied" })
+
+    expect(await screen.findByText("GitLab sign-in was cancelled")).toBeInTheDocument()
   })
 
   it("shows an empty state without asking the forge for every repository", async () => {

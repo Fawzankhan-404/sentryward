@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.ts";
@@ -10,11 +11,25 @@ import { FORGE_PROVIDERS, forgeName } from "../review/forge/providers.ts";
 import { hostOrigin } from "../review/forge/types.ts";
 import { loadWorkspaceConnection } from "../services/forge.ts";
 import { getGitHubApp, githubInstallUrl } from "../services/githubApp.ts";
+import {
+  exchangeCode,
+  gitlabAuthorizeUrl,
+  gitlabOAuthConfigured,
+  pkcePair,
+  ReconnectRequiredError,
+  storedTokens,
+} from "../services/gitlabOAuth.ts";
 import { isForgeProvider, PROVIDERS, providerFor } from "../services/providers/index.ts";
 import { UnreadableTokenError } from "../services/providers/token.ts";
 import { removeWebhook } from "../services/webhooks.ts";
 import { loadMembership, requireRole } from "../services/workspaces.ts";
-import { githubCallbackSchema, githubInstallSchema } from "../schemas/connections.schema.ts";
+import { GitLabAdapter } from "../review/forge/gitlab.ts";
+import {
+  githubCallbackSchema,
+  githubInstallSchema,
+  gitlabOAuthCallbackSchema,
+  gitlabOAuthStartSchema,
+} from "../schemas/connections.schema.ts";
 
 const publicConnection = {
   id: true,
@@ -27,6 +42,7 @@ const publicConnection = {
 } as const;
 
 const INSTALL_STATE_PURPOSE = "github-install";
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 export async function listConnections(req: Request, res: Response) {
   const rows = await prisma.forgeConnection.findMany({
@@ -40,7 +56,10 @@ export async function listConnections(req: Request, res: Response) {
     repositoryCount: _count.repositories,
   }));
   const availableApps = FORGE_PROVIDERS.filter((provider) => PROVIDERS[provider].appAvailable?.());
-  res.json({ connections, availableApps });
+  // Which host the OAuth app belongs to, so the client offers it on the matching
+  // (cloud or self-hosted) option.
+  const oauthHosts = gitlabOAuthConfigured() ? { gitlab: env.GITLAB_OAUTH_HOST } : {};
+  res.json({ connections, availableApps, oauthHosts });
 }
 
 const RECENT_REVIEWS = 5;
@@ -100,7 +119,8 @@ export async function getConnection(req: Request, res: Response) {
 
 // Asks the forge whether the stored credentials still work. Always 200: a
 // refused or unreachable forge is the answer, not a failure of this request.
-// A token this server can no longer decrypt needs reconnecting, like a revoked one.
+// A token this server can no longer decrypt, or an OAuth grant GitLab will no
+// longer renew, needs reconnecting, like a revoked one.
 export async function connectionStatus(req: Request, res: Response) {
   const connection = await loadWorkspaceConnection(req.workspaceId!, String(req.params.id));
   let status: "active" | "revoked" | "unreachable";
@@ -109,7 +129,9 @@ export async function connectionStatus(req: Request, res: Response) {
     status = "active";
   } catch (err) {
     const refused =
-      err instanceof UnreadableTokenError || (err instanceof ForgeError && [401, 403, 404].includes(err.status));
+      err instanceof UnreadableTokenError ||
+      err instanceof ReconnectRequiredError ||
+      (err instanceof ForgeError && [401, 403, 404].includes(err.status));
     status = refused ? "revoked" : "unreachable";
   }
   res.json({ status });
@@ -236,6 +258,95 @@ export async function githubCallback(req: Request, res: Response) {
     return backToClient(res, { error: "github_install_failed" });
   }
   backToClient(res, { connected: "github" });
+}
+
+// Like githubInstall, a browser navigation that takes the workspace as a query
+// parameter. The state is a single-use row rather than a signed token, so a
+// callback URL cannot be replayed.
+export async function gitlabOAuthStart(req: Request, res: Response) {
+  const { workspace } = gitlabOAuthStartSchema.parse(req.query);
+  const access = await loadMembership(req.userId!, workspace);
+  requireRole(access.role, "admin");
+  if (!gitlabOAuthConfigured()) {
+    throw new HttpError(503, "GitLab OAuth is not configured on this server");
+  }
+  const host = env.GITLAB_OAUTH_HOST;
+  await assertSafeForgeHost(host);
+
+  await prisma.oAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  const { verifier, challenge } = pkcePair();
+  const state = await prisma.oAuthState.create({
+    data: {
+      id: randomBytes(32).toString("base64url"),
+      userId: req.userId!,
+      workspaceId: access.workspaceId,
+      host,
+      codeVerifier: verifier,
+      expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
+    },
+  });
+  res.redirect(gitlabAuthorizeUrl(host, state.id, challenge));
+}
+
+// GitLab sends the browser back here, so like githubCallback every outcome is
+// a redirect to the client.
+export async function gitlabOAuthCallback(req: Request, res: Response) {
+  const parsed = gitlabOAuthCallbackSchema.safeParse(req.query);
+  if (!parsed.success || !gitlabOAuthConfigured()) {
+    return backToClient(res, { error: "gitlab_oauth_failed" });
+  }
+  const { state: stateId, code, error } = parsed.data;
+
+  // Only the user who started the flow can use it, once: of two requests with
+  // the same state, only the one whose delete removed the row goes on.
+  const state = await prisma.oAuthState.findFirst({
+    where: { id: stateId, userId: req.userId, expiresAt: { gt: new Date() } },
+  });
+  const consumed = state ? await prisma.oAuthState.deleteMany({ where: { id: state.id } }) : null;
+  if (!state || consumed?.count !== 1) {
+    return backToClient(res, { error: "gitlab_oauth_failed" });
+  }
+  if (error || !code) {
+    return backToClient(res, { error: error === "access_denied" ? "gitlab_oauth_denied" : "gitlab_oauth_failed" });
+  }
+  // Rights may have changed during the round trip to GitLab.
+  const access = await loadMembership(req.userId!, state.workspaceId).catch(() => null);
+  if (!access || access.role === "member") {
+    return backToClient(res, { error: "gitlab_oauth_failed" });
+  }
+
+  try {
+    const tokens = await exchangeCode(state.host, code, state.codeVerifier);
+    const { login } = await new GitLabAdapter({
+      host: state.host,
+      token: async () => tokens.accessToken,
+      oauth: true,
+    }).currentAccount();
+    const workspaceId = access.workspaceId;
+    const existing = await prisma.forgeConnection.findFirst({
+      where: { workspaceId, provider: "gitlab", kind: "oauth", host: state.host, accountLogin: login },
+    });
+    const data = storedTokens(tokens);
+    if (existing) {
+      await prisma.forgeConnection.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.forgeConnection.create({
+        data: {
+          ...data,
+          workspaceId,
+          createdById: req.userId,
+          provider: "gitlab",
+          host: state.host,
+          kind: "oauth",
+          accountLogin: login,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("GitLab OAuth callback failed", err);
+    return backToClient(res, { error: "gitlab_oauth_failed" });
+  }
+  backToClient(res, { connected: "gitlab" });
 }
 
 export async function deleteConnection(req: Request, res: Response) {

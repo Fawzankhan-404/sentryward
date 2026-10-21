@@ -255,7 +255,8 @@ before `up`.
 
 - **Public URL:** set `CLIENT_ORIGIN` and `API_PUBLIC_URL` to the same `https://`
   URL. The GitHub App's setup URL becomes `<url>/api/connections/github/callback` and
-  its webhook URL `<url>/api/webhooks/github`; GitLab webhooks use it automatically.
+  its webhook URL `<url>/api/webhooks/github`; a GitLab OAuth application's redirect URI
+  becomes `<url>/api/connections/gitlab/oauth/callback`; GitLab webhooks use it automatically.
 - **Reverse proxy:** the API listens on `127.0.0.1:4000` on the host (`API_BIND`,
   `API_HOST_PORT`). `TRUST_PROXY` (default `1`) is the number of proxies in front,
   so rate limits see client addresses; set it to match your setup. A minimal Caddy
@@ -291,6 +292,15 @@ Read [SECURITY.md](SECURITY.md) before exposing an instance.
 ## Forge connections
 
 **GitLab**: connect with a personal, project or group access token with the `api` scope and at least Developer access. Self-hosted instances work by entering their host.
+
+GitLab can also connect through OAuth ("Connect with GitLab"), alongside tokens. Register an application on the instance (User, Group or Admin settings, Applications) and put its details in `.env`:
+
+- Redirect URI: `<CLIENT_ORIGIN>/api/connections/gitlab/oauth/callback` (for local development `http://localhost:5173/api/connections/gitlab/oauth/callback`). It goes through the client origin so the browser sends the session cookie with it.
+- Scope: `api`. GitLab has no narrower scope that allows posting comments, discussions and commit statuses.
+- **Confidential** checked, and **Expire access tokens** on. Sentryward stores the access and refresh tokens encrypted and refreshes the access token shortly before it expires. GitLab rotates the refresh token on every refresh, so refreshes of one connection are serialized; if GitLab refuses one (the application was revoked, the user removed), the connection shows as inactive and reviews fail asking you to reconnect.
+- `GITLAB_OAUTH_HOST` (default `gitlab.com`), `GITLAB_OAUTH_CLIENT_ID` and `GITLAB_OAUTH_CLIENT_SECRET`. One instance per deployment; tokens still work for any other.
+
+An OAuth connection acts as the person who signed in: reviews, comments and statuses appear under their name, and it can reach what they can. A project or group access token posts as a GitLab bot user instead, so prefer a token when comments should not come from a person. Either way, automatic reviews need Maintainer access (see below).
 
 **GitHub**: create a GitHub App (Settings, Developer settings, GitHub Apps) and put its details in `.env`:
 
@@ -467,10 +477,12 @@ so scripts written before workspaces keep working. Routes under
 | POST   | `/api/auth/login`    | `{ email, password }`, sets the auth cookie |
 | POST   | `/api/auth/logout`   | Clears the auth cookie |
 | GET    | `/api/auth/me`       | Current user, or 401 |
-| GET    | `/api/connections`   | The workspace's forge connections, and whether GitHub is configured |
+| GET    | `/api/connections`   | The workspace's forge connections, which browser connect flows are configured, and the GitLab OAuth host |
 | POST   | `/api/connections/gitlab` | `{ host?, token }`, validates the token against GitLab and stores it encrypted |
 | GET    | `/api/connections/github/install?workspace=` | Redirects to the GitHub App's install page; the installation is added to that workspace |
 | GET    | `/api/connections/github/callback` | GitHub's return URL after installing the app |
+| GET    | `/api/connections/gitlab/oauth/start?workspace=` | Redirects to GitLab's OAuth authorize page with a single-use state (PKCE) |
+| GET    | `/api/connections/gitlab/oauth/callback` | GitLab's OAuth redirect URI; validates the state, exchanges the code and stores the connection |
 | DELETE | `/api/connections/:id` | Removes a connection and its repositories |
 | GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
 | POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
