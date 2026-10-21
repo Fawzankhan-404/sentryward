@@ -20,6 +20,28 @@ const OMISSION_TEXT: Record<string, string> = {
   chunk_failed: "review pass failed",
 }
 
+const DROP_REASON_TEXT: Record<string, string> = {
+  invalid_line: "Invalid line number",
+  unknown_file: "File not in the change",
+  category: "Category not enabled",
+  off_diff: "Outside changed lines",
+  low_confidence: "Low confidence",
+  below_floor: "Below the severity floor",
+  empty: "Empty finding",
+  duplicate: "Duplicate",
+  over_limit: "Over the findings limit",
+  previously_ignored: "Previously ignored on this change",
+  refuted: "Refuted by verification",
+}
+
+// A reason added on the server before the client knows it still reads as text.
+function dropReasonText(reason: string) {
+  const known = DROP_REASON_TEXT[reason]
+  if (known) return known
+  const words = reason.replace(/_/g, " ").trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : reason
+}
+
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? "" : "s"}`
 }
@@ -146,6 +168,32 @@ function CoverageCard({ result }: { result: ReviewResult }) {
   )
 }
 
+// Counts only: what was filtered or downgraded, never the discarded text.
+function ValidationCard({ result }: { result: ReviewResult }) {
+  const { dropped, demoted } = result.validation
+  const drops = Object.entries(dropped)
+    .filter(([, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+  if (drops.length === 0 && demoted === 0) return null
+  return (
+    <SideCard title="Validation">
+      {drops.length > 0 && (
+        <>
+          <p className="text-muted-foreground">Filtered before publishing</p>
+          <dl className="flex flex-col gap-1.5">
+            {drops.map(([reason, count]) => (
+              <Row key={reason} label={dropReasonText(reason)}>
+                {count}
+              </Row>
+            ))}
+          </dl>
+        </>
+      )}
+      {demoted > 0 && <p>{plural(demoted, "finding")} downgraded because evidence was missing or unverified</p>}
+    </SideCard>
+  )
+}
+
 function UsageCard({ result }: { result: ReviewResult }) {
   const { usageTotals, usage } = result
   return (
@@ -184,6 +232,7 @@ export function ReviewSidebar({ review, result }: { review: ReviewDetail; result
       <ChangeCard review={review} result={result} />
       {review.publication && <PublicationCard publication={review.publication} forge={forge} />}
       {result && <CoverageCard result={result} />}
+      {result && <ValidationCard result={result} />}
       {result && <UsageCard result={result} />}
     </aside>
   )
