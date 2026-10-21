@@ -141,7 +141,7 @@ function deps(
     getChangeHead: async () => {
       const states = options.states ?? ["open"];
       const state = states.length > 1 ? states.shift()! : states[0]!;
-      return { headSha: "newhead", title: "t", state, isDraft: false };
+      return { headSha: "newhead", baseSha: "base", title: "t", state, isDraft: false };
     },
     getLinkedIssues: async () => options.issues?.linked ?? [],
     searchIssues: async (_project: string, terms: string[]) => {

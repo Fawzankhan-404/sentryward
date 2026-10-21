@@ -94,6 +94,14 @@ describe("GitHubAdapter", () => {
     });
   });
 
+  it("reads a pull request's head and base without its files", async () => {
+    const { adapter: gh, calls } = adapter([
+      { url: /\/pulls\/42$/, body: { title: "t", state: "open", base: { sha: "b", ref: "main" }, head: { sha: "h", ref: "f" } } },
+    ]);
+    expect(await gh.getChangeHead("acme/web", 42)).toEqual({ headSha: "h", baseSha: "b", title: "t", state: "open", isDraft: false });
+    expect(calls).toHaveLength(1);
+  });
+
   it("refuses a pagination link to another host", async () => {
     const { adapter: gh, calls } = adapter([
       { url: /\/pulls\/42$/, body: { title: "t", body: null, base: { sha: "b", ref: "main" }, head: { sha: "h", ref: "f" } } },
@@ -217,10 +225,27 @@ describe("GitHubAdapter", () => {
 
     expect(await gh.createHook(repo, "https://sentryward.example.com/hook", "s3cret")).toBe("77");
     expect(JSON.parse(calls[0]!.body!)).toMatchObject({
-      events: ["pull_request", "issue_comment"],
+      events: ["pull_request", "issue_comment", "pull_request_review_comment"],
       config: { url: "https://sentryward.example.com/hook", secret: "s3cret", content_type: "json" },
     });
     await expect(gh.deleteHook(repo, "77")).resolves.toBeUndefined();
+  });
+
+  it("reads a thread's root comment and replies in the thread", async () => {
+    const stub = fetchStub([
+      { url: /\/repos\/acme\/web\/pulls\/comments\/700$/, body: { id: 700, body: "x\n<!-- sentryward:fp=0123456789abcdef -->", user: { login: "bot[bot]" } } },
+      { url: /\/repos\/acme\/web\/pulls\/comments\/404$/, status: 404, body: { message: "Not Found" } },
+      { method: "POST", url: /\/repos\/acme\/web\/pulls\/42\/comments\/700\/replies$/, body: { id: 702 } },
+    ]);
+    const gh = new GitHubAdapter({ host: "github.com", token: async () => "tok", fetch: stub.fetch, selfLogin: "bot[bot]" });
+    const target = { project: "acme/web", number: 42 };
+
+    expect(await gh.getThreadRoot(target, "700")).toEqual({ ownedBySelf: true, fingerprint: "0123456789abcdef" });
+    expect(await gh.getThreadRoot(target, "404")).toBeNull();
+    expect(await gh.replyToThread(target, "700", "Because.")).toBe("702");
+    expect(JSON.parse(stub.calls.at(-1)!.body!)).toEqual({ body: "Because." });
+    expect(gh.isSelfLogin("bot[bot]")).toBe(true);
+    expect(gh.isSelfLogin("alice")).toBe(false);
   });
 
   describe("getToolAnnotations", () => {
@@ -405,6 +430,22 @@ describe("GitLabAdapter", () => {
     const stub = fetchStub(routes);
     return { ...stub, adapter: new GitLabAdapter({ host, token: async () => "glpat", fetch: stub.fetch }) };
   };
+
+  it("reads a merge request's head and base, falling back to its target branch", async () => {
+    let refs: unknown = { base_sha: "b", start_sha: "s", head_sha: "h" };
+    const { adapter: gl } = adapter([
+      {
+        url: /\/merge_requests\/7$/,
+        get body() {
+          return { iid: 7, title: "t", state: "opened", sha: "h", target_branch: "main", diff_refs: refs };
+        },
+      },
+    ]);
+    expect(await gl.getChangeHead("team/app", 7)).toMatchObject({ headSha: "h", baseSha: "b", state: "open" });
+    // Just opened: GitLab has not computed the diff yet.
+    refs = null;
+    expect(await gl.getChangeHead("team/app", 7)).toMatchObject({ headSha: "h", baseSha: "main" });
+  });
 
   it("lists open merge requests by iid", async () => {
     const { adapter: gl, calls } = adapter([
@@ -703,5 +744,28 @@ describe("GitLabAdapter", () => {
       ]);
       await expect(gl.compareCommits("team/app", "h1", "h2")).rejects.toBeInstanceOf(ForgeError);
     });
+  });
+
+  it("reads a discussion's first note and replies in the discussion", async () => {
+    const stub = fetchStub([
+      {
+        url: /\/projects\/team%2Fapp\/merge_requests\/7\/discussions\/d1$/,
+        body: {
+          id: "d1",
+          notes: [
+            { id: 1, body: "x\n<!-- sentryward:fp=0123456789abcdef -->", system: false, author: { username: "alice" } },
+            { id: 2, body: "?", system: false, author: { username: "bot" } },
+          ],
+        },
+      },
+      { method: "POST", url: /\/projects\/team%2Fapp\/merge_requests\/7\/discussions\/d1\/notes$/, body: { id: 3 } },
+    ]);
+    const gl = new GitLabAdapter({ host: "gitlab.acme.com", token: async () => "glpat", fetch: stub.fetch, selfLogin: "bot" });
+    const target = { project: "team/app", number: 7 };
+
+    // Only the first note decides whose thread it is.
+    expect(await gl.getThreadRoot(target, "d1")).toEqual({ ownedBySelf: false, fingerprint: "0123456789abcdef" });
+    expect(await gl.replyToThread(target, "d1", "Because.")).toBe("3");
+    expect(JSON.parse(stub.calls.at(-1)!.body!)).toEqual({ body: "Because." });
   });
 });

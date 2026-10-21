@@ -264,6 +264,7 @@ model Repository {
   reviewJobs     ReviewJob[]
   postedFindings PostedFinding[]
   findings       Finding[]
+  threadReplies  ThreadReply[]
 
   @@unique([connectionId, externalId])
   @@map("repositories")
@@ -361,6 +362,59 @@ model Finding {
   @@unique([repositoryId, number, fingerprint])
   @@index([repositoryId, state])
   @@map("findings")
+}
+
+// What a reply on one of Sentryward's inline threads asked for.
+enum ThreadReplyKind {
+  ignore
+  question
+
+  @@map("thread_reply_kind")
+}
+
+enum ThreadReplyStatus {
+  queued
+  running
+  done
+  skipped
+  failed
+
+  @@map("thread_reply_status")
+}
+
+// A person's reply on an inline finding thread, recorded by the webhook and
+// answered by the worker, so model latency and forge calls stay out of the
+// webhook. Unique on the forge comment so a redelivered event is a no-op, and
+// the rows double as the per-change rate limit.
+model ThreadReply {
+  id              String            @id @default(uuid()) @db.Uuid
+  repositoryId    String            @map("repository_id") @db.Uuid
+  number          Int
+  fingerprint     String
+  // GitHub: the thread's root comment id. GitLab: the discussion id.
+  threadId        String            @map("thread_id")
+  commentId       String            @map("comment_id")
+  actor           String
+  kind            ThreadReplyKind
+  // The reply text as written: untrusted, only ever sent to a model as data.
+  body            String
+  // Ignore commands only; null with kind ignore means the reason was not understood.
+  ignoreReason    IgnoreReason?     @map("ignore_reason")
+  ignoreNote      String?           @map("ignore_note")
+  status          ThreadReplyStatus @default(queued)
+  answerCommentId String?           @map("answer_comment_id")
+  error           String?
+  attempts        Int               @default(0)
+  lockedAt        DateTime?         @map("locked_at") @db.Timestamptz
+  finishedAt      DateTime?         @map("finished_at") @db.Timestamptz
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, commentId])
+  @@index([repositoryId, number, createdAt])
+  @@index([status, createdAt])
+  @@map("thread_replies")
 }
 
 model LlmCredential {

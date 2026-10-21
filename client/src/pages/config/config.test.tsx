@@ -64,6 +64,7 @@ const effective = {
     fullReviewOnPush: false,
     summary: "published",
     command: true,
+    replies: true,
     abortOnClose: true,
     ignoreTitles: [],
     skipAuthors: [],

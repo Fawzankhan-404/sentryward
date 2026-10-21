@@ -19,11 +19,14 @@ import {
   type ForgeAdapter,
   type ForgeHooks,
   type ForgePublisher,
+  type ForgeThreads,
   type ForgeRepo,
   type HookTarget,
   type InlineComment,
   type InlineResult,
   type ThreadResult,
+  type ThreadRoot,
+  type ThreadTarget,
 } from "./types.ts";
 
 export interface GitHubAdapterOptions {
@@ -187,7 +190,7 @@ function reviewComment(comment: InlineComment) {
   };
 }
 
-export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
+export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks, ForgeThreads {
   readonly provider = "github" as const;
   readonly host: string;
   private http: ForgeHttp;
@@ -279,6 +282,7 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     const merged = pull.merged ?? Boolean(pull.merged_at);
     return {
       headSha: pull.head.sha,
+      baseSha: pull.base.sha,
       title: pull.title,
       state: merged ? "merged" : pull.state,
       isDraft: pull.draft ?? false,
@@ -417,7 +421,32 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   }
 
   private isSelf(comment: GhComment): boolean {
-    return Boolean(this.options.selfLogin) && comment.user?.login === this.options.selfLogin;
+    return this.isSelfLogin(comment.user?.login);
+  }
+
+  isSelfLogin(login: string | undefined): boolean {
+    return Boolean(this.options.selfLogin) && login === this.options.selfLogin;
+  }
+
+  // GitHub threads are flat: every reply's in_reply_to_id is the root comment.
+  async getThreadRoot(target: ThreadTarget, threadId: string): Promise<ThreadRoot | null> {
+    try {
+      const comment = await this.http.json<GhComment>(
+        `${repoApiPath(target.project)}/pulls/comments/${encodeURIComponent(threadId)}`,
+      );
+      return { ownedBySelf: this.isSelf(comment), fingerprint: markersIn(comment.body)[0] ?? null };
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  async replyToThread(target: ThreadTarget, threadId: string, body: string): Promise<string> {
+    const created = await this.http.json<GhComment>(
+      `${repoApiPath(target.project)}/pulls/${target.number}/comments/${encodeURIComponent(threadId)}/replies`,
+      { method: "POST", body: JSON.stringify({ body }) },
+    );
+    return String(created.id);
   }
 
   // One review carries every inline comment, posted as COMMENT: Sentryward never
@@ -604,7 +633,7 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       body: JSON.stringify({
         name: "web",
         active: true,
-        events: ["pull_request", "issue_comment"],
+        events: ["pull_request", "issue_comment", "pull_request_review_comment"],
         config: { url, secret, content_type: "json", insecure_ssl: "0" },
       }),
     });

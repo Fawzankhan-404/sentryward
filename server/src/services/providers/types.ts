@@ -1,8 +1,8 @@
 import type { z } from "zod";
 import type { ForgeConnection, Repository } from "../../generated/prisma/client.ts";
-import type { ForgeAccount, ForgeAdapter, ForgeHooks, ForgePublisher } from "../../review/forge/types.ts";
+import type { ForgeAccount, ForgeAdapter, ForgeHooks, ForgePublisher, ForgeThreads } from "../../review/forge/types.ts";
 
-export type Forge = ForgeAdapter & ForgePublisher & ForgeHooks;
+export type Forge = ForgeAdapter & ForgePublisher & ForgeHooks & ForgeThreads;
 
 export type RepoWithConnection = Repository & { connection: ForgeConnection };
 

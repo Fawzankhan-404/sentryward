@@ -2,6 +2,9 @@
 // its own summary and tell which findings it already commented on.
 
 export const SUMMARY_MARKER = "<!-- sentryward:summary -->";
+// Every reply Sentryward posts in a finding's thread, so a webhook for it is
+// never mistaken for a person's reply, even under another login.
+export const REPLY_MARKER = "<!-- sentryward:reply -->";
 // A walkthrough posted as a comment of its own.
 export const WALKTHROUGH_MARKER = "<!-- sentryward:walkthrough -->";
 // Earlier versions wrote the walkthrough into the PR/MR description between

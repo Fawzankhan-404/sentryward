@@ -72,6 +72,7 @@ export interface ConfigOverride {
     fullReviewOnPush?: boolean
     summary?: SummaryTrigger
     command?: boolean
+    replies?: boolean
     abortOnClose?: boolean
     ignoreTitles?: string[]
     skipAuthors?: string[]
@@ -152,6 +153,7 @@ export interface EffectiveConfig {
     fullReviewOnPush: boolean
     summary: SummaryTrigger
     command: boolean
+    replies: boolean
     abortOnClose: boolean
     ignoreTitles: string[]
     skipAuthors: string[]

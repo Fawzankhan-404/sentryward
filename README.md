@@ -307,7 +307,7 @@ An OAuth connection acts as the person who signed in: reviews, comments and stat
 - Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Sentryward uses that OAuth code to confirm the installing user can actually access the installation.
 - Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Issues (read), Checks (read), Metadata (read). Issues is used for linked and related issues in the walkthrough; without it those parts are skipped with a warning. Checks is used for [static analysis findings](#static-analysis-findings); without it they are skipped with a warning.
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
-- Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment** and **Installation**.
+- Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment**, **Pull request review comment** and **Installation**. Review comment events are how [replies to findings](#replying-to-findings) arrive; an App created before they existed needs the event added in its settings.
 
 GitLab automatic reviews need a project webhook, which Sentryward registers when a repository is enabled at `API_PUBLIC_URL`. That takes **Maintainer** access; with only Developer access the repository is enabled for manual reviews and the dashboard says why automatic ones are off. GitLab must be able to reach `API_PUBLIC_URL`; for local development use a tunnel.
 
@@ -326,6 +326,17 @@ When a review starts, Sentryward posts a "reviewing" summary comment and sets a 
 - **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
 
 Turn the first three off with `output.post_inline`, `output.post_summary` and `output.post_check`, and the walkthrough with `output.walkthrough`. If publishing fails, the review is kept and the job is marked partial with the reason.
+
+## Replying to findings
+
+Reply in the thread of one of Sentryward's inline comments to act on that finding:
+
+- `/sentryward ignore false-positive [note]` or `/sentryward ignore intentional [note]` (at the start of a line; the rest of the line is the note) ignores the finding with that reason, as the dashboard would, and Sentryward acknowledges it in the thread. With `review.suppress_ignored`, later reviews of the change do not raise it again. Reopen it from the findings page.
+- Anything else is a question: Sentryward answers once, briefly, from the finding and the code around it at the change's head, using the review model. The reply is treated as untrusted data, never as instructions.
+
+Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) get a response. Sentryward never answers its own comments, acts on at most 10 replies per PR/MR per hour (the rest are dropped silently) and handles a redelivered event once. Replies are answered by the worker; `triggers.replies` turns them off, read like the rest of the configuration from the change's base revision.
+
+GitHub needs the **Pull request review comment** webhook event: per-repository hooks registered before this existed get it when the repository is disabled and enabled again. GitLab delivers diff thread notes through the note events its hook already subscribes to.
 
 ## Automatic reviews
 
@@ -434,6 +445,7 @@ triggers:
   full_review_on_push: false  # on push, review every file, not only those the new commits touched
   summary: published        # manual | published: walkthrough in automatic reviews
   command: true             # allow "/sentryward review" in a comment
+  replies: true             # answer replies on Sentryward's inline comments, and "/sentryward ignore"
   abort_on_close: true      # stop a review when its PR/MR is closed or merged
   ignore_titles: ["WIP"]    # title contains, ignoring case
   skip_authors: ["dependabot[bot]"]

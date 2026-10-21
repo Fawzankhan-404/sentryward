@@ -33,6 +33,7 @@ export const FLAGS = [
   { name: "reviewOnPush", section: "triggers" },
   { name: "fullReviewOnPush", section: "triggers" },
   { name: "command", section: "triggers" },
+  { name: "replies", section: "triggers" },
   { name: "abortOnClose", section: "triggers" },
 ] as const
 

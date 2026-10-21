@@ -62,6 +62,7 @@ const schema: ConfigSchema = {
       fullReviewOnPush: false,
       summary: "published",
       command: true,
+      replies: true,
       abortOnClose: true,
       ignoreTitles: [],
       skipAuthors: [],
