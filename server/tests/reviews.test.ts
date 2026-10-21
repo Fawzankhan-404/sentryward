@@ -320,7 +320,7 @@ describe("GET /api/reviews/:id and /markdown", () => {
     const res = await request(app).get(`/api/reviews/${job.id}/markdown`).set("Cookie", cookie);
 
     expect(res.text).toBe(toMarkdown(await sampleResult()));
-    expect(res.text).toContain("Prompt for all review comments with AI agents");
+    expect(res.text).toContain("Prompt for AI agents (4 findings)");
   });
 
   it("leaves out the stats line when the review's config turned it off", async () => {

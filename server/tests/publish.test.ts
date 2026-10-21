@@ -328,7 +328,7 @@ describe("walkthrough placement and labels", () => {
 
   it("adds the agent prompts by default and leaves each out when turned off", async () => {
     const on = await publish({});
-    expect(on.calls.summaries[0]).toContain("Prompt for all review comments with AI agents");
+    expect(on.calls.summaries[0]).toContain("Prompt for AI agents (4 findings)");
     expect(on.calls.inline.length).toBeGreaterThan(0);
     for (const comment of on.calls.inline) expect(comment.body).toContain("Prompt for AI agents");
 

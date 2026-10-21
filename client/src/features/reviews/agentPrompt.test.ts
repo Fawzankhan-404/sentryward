@@ -20,11 +20,21 @@ describe("agent prompts", () => {
     )
   })
 
-  it("numbers every finding in file and line order", () => {
+  it("numbers every finding by severity, then file and line", () => {
     const prompt = allFindingsPrompt([...result.findings].reverse())
     expect(prompt.startsWith("Verify each finding against the current code")).toBe(true)
-    expect(prompt.indexOf("1. In src/app.ts around line 11")).toBeGreaterThan(0)
-    expect(prompt).toContain("3. In src/app.ts around line 40: Caller ignores result")
-    expect(prompt).toContain("   Why it matters.")
+    expect(prompt).toContain(
+      [
+        "1. [critical] src/app.ts:11 - SQL injection in search",
+        "Why it matters.",
+        "Suggested replacement:",
+        "----",
+        "db.query(sql, [q])",
+        "----",
+        "",
+      ].join("\n"),
+    )
+    expect(prompt).toContain("2. [major] src/app.ts:40 - Caller ignores result")
+    expect(prompt).toContain("3. [minor] src/app.ts:11 - Rename c")
   })
 })

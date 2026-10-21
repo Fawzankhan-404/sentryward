@@ -1,4 +1,5 @@
 import type { Finding } from "../core/models.ts";
+import { severityRank } from "../core/severity.ts";
 import { fence, sanitize } from "./markdown.ts";
 
 // Plain text a reader pastes into a coding agent. Each prompt stands on its own
@@ -7,15 +8,28 @@ import { fence, sanitize } from "./markdown.ts";
 // them, so the agent is told to check before editing.
 const VERIFY = "Verify this against the current code first; it may already be fixed.";
 
+// Marks where suggested code starts and ends, so it stays apart from the prose
+// in a long plain-text prompt where no markdown renders.
+const CODE_DELIMITER = "----";
+
 function lines(finding: Finding): string {
   return finding.startLine === finding.endLine
     ? `line ${finding.startLine}`
     : `lines ${finding.startLine}-${finding.endLine}`;
 }
 
+function location(finding: Finding): string {
+  const range = finding.startLine === finding.endLine ? `${finding.startLine}` : `${finding.startLine}-${finding.endLine}`;
+  return `${finding.file}:${range}`;
+}
+
+function suggestion(finding: Finding): string {
+  return finding.suggestion!.replace(/\n$/, "");
+}
+
 function describe(finding: Finding): string[] {
   const parts = [`In ${finding.file} around ${lines(finding)}: ${finding.title.trim()}`, "", finding.body.trim()];
-  if (finding.suggestion) parts.push("", "Suggested replacement for those lines:", "", finding.suggestion.replace(/\n$/, ""));
+  if (finding.suggestion) parts.push("", "Suggested replacement for those lines:", "", suggestion(finding));
   return parts;
 }
 
@@ -23,13 +37,20 @@ export function findingPrompt(finding: Finding): string {
   return sanitize([...describe(finding), "", VERIFY].join("\n"));
 }
 
-// Every finding in the review, in file order, so one paste covers the change.
+// Every finding in the review, most severe first so an agent (or a person
+// trimming the paste) gets to the important ones before the nitpicks.
 export function allFindingsPrompt(findings: Finding[]): string {
-  const ordered = [...findings].sort((a, b) => a.file.localeCompare(b.file) || a.startLine - b.startLine);
-  const parts = ["Verify each finding against the current code and only fix it if it still applies.", ""];
+  const ordered = [...findings].sort(
+    (a, b) => severityRank(b.severity) - severityRank(a.severity) || a.file.localeCompare(b.file) || a.startLine - b.startLine,
+  );
+  const parts = [
+    "Verify each finding against the current code and only fix it if it still applies. Ordered by severity, most severe first.",
+    "",
+  ];
   ordered.forEach((finding, index) => {
-    const [first = "", ...rest] = describe(finding);
-    parts.push(`${index + 1}. ${first}`, ...rest.map((line) => (line ? `   ${line}` : "")), "");
+    parts.push(`${index + 1}. [${finding.severity}] ${location(finding)} - ${finding.title.trim()}`, finding.body.trim());
+    if (finding.suggestion) parts.push("Suggested replacement:", CODE_DELIMITER, suggestion(finding), CODE_DELIMITER);
+    parts.push("");
   });
   return sanitize(parts.join("\n").trimEnd());
 }

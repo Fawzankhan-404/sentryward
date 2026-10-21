@@ -195,7 +195,9 @@ const globalRoutes = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-describe("Configuration page", () => {
+// Several tests walk the whole form across tabs with userEvent; they take ~2s
+// locally but exceed the 5s default on slower CI runners.
+describe("Configuration page", { timeout: 20_000 }, () => {
   it("is linked from the sidebar", async () => {
     mockApi(globalRoutes())
     renderWithProviders(<App />, { route: "/home" })
