@@ -15,19 +15,22 @@ function parseSize(raw: string | null) {
 
 // ?page= and ?size= keep the current page linkable and survive a reload.
 // Defaults are left out of the URL, and other params (e.g. ?tab=) are kept.
-export function usePagination() {
+// A prefix gives a second table on the same page its own params (?fpPage=).
+export function usePagination(prefix?: string) {
   const [params, setParams] = useSearchParams()
-  const page = parsePage(params.get("page"))
-  const size = parseSize(params.get("size"))
+  const pageKey = prefix ? `${prefix}Page` : "page"
+  const sizeKey = prefix ? `${prefix}Size` : "size"
+  const page = parsePage(params.get(pageKey))
+  const size = parseSize(params.get(sizeKey))
 
   function update(next: { page: number; size: number }) {
     setParams(
       (current) => {
         const updated = new URLSearchParams(current)
-        if (next.page === 1) updated.delete("page")
-        else updated.set("page", String(next.page))
-        if (next.size === DEFAULT_SIZE) updated.delete("size")
-        else updated.set("size", String(next.size))
+        if (next.page === 1) updated.delete(pageKey)
+        else updated.set(pageKey, String(next.page))
+        if (next.size === DEFAULT_SIZE) updated.delete(sizeKey)
+        else updated.set(sizeKey, String(next.size))
         return updated
       },
       { replace: true },
