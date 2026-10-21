@@ -5,6 +5,7 @@ import { GitLabAdapter } from "../../review/forge/gitlab.ts";
 import { gitlabConnectSchema } from "../../schemas/connections.schema.ts";
 import { gitlabAccessToken, gitlabOAuthConfigured } from "../gitlabOAuth.ts";
 import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
+import { recordThreadReply } from "../threadReplies.ts";
 import type { ProviderDefinition } from "./types.ts";
 import { decryptToken } from "./token.ts";
 
@@ -14,11 +15,15 @@ interface GitLabPayload {
   object_kind?: string;
   user?: { id: number; username?: string };
   object_attributes?: {
+    id?: number;
     action?: string;
     iid?: number;
     oldrev?: string;
     noteable_type?: string;
     note?: string;
+    // "DiffNote" for a note on a diff line, which is where inline threads live.
+    type?: string | null;
+    discussion_id?: string;
     last_commit?: { id: string };
   };
   changes?: { draft?: { previous: boolean; current: boolean } };
@@ -109,6 +114,31 @@ export const gitlabProvider: ProviderDefinition = {
           actor: payload.user.username,
         });
         return { body: { outcome: "queued", reviewId: job.id } };
+      }
+
+      // A note on a diff thread. The thread's own first note arrives here too;
+      // recordThreadReply drops it because Sentryward wrote it.
+      if (
+        event === "Note Hook" &&
+        attrs.noteable_type === "MergeRequest" &&
+        attrs.type === "DiffNote" &&
+        attrs.discussion_id &&
+        attrs.id &&
+        payload.merge_request &&
+        payload.user
+      ) {
+        const user = payload.user;
+        const forge = adapterFor(repo.connection);
+        return recordThreadReply({
+          repo,
+          forge,
+          number: payload.merge_request.iid,
+          threadId: attrs.discussion_id,
+          commentId: String(attrs.id),
+          actor: user.username,
+          body: attrs.note ?? "",
+          allowed: async () => (await forge.memberAccessLevel(repo.externalId, user.id)) >= DEVELOPER,
+        });
       }
 
       return { body: { outcome: "ignored" } };

@@ -139,6 +139,19 @@ export interface CommitStatus {
 
 export const STATUS_CONTEXT = "sentryward/review";
 
+// The change a thread lives on; a webhook knows no more than this.
+export interface ThreadTarget {
+  project: string;
+  number: number;
+}
+
+// The first comment of an inline thread: the finding it is about when
+// Sentryward opened the thread, read from the hidden fingerprint marker.
+export interface ThreadRoot {
+  ownedBySelf: boolean;
+  fingerprint: string | null;
+}
+
 export interface ForgePublisher {
   postInlineComments(ref: ForgeRef, comments: InlineComment[]): Promise<InlineResult>;
   // Fingerprints in Sentryward's own inline comments on this change, read from their
@@ -156,4 +169,16 @@ export interface ForgePublisher {
   // Resolves (or reopens) Sentryward's own inline threads for these findings,
   // found by the hidden fingerprint marker in each thread's first comment.
   setThreadsResolved(ref: ForgeRef, fingerprints: string[], resolved: boolean): Promise<ThreadResult>;
+}
+
+// Conversation in Sentryward's inline threads: people replying to a finding.
+export interface ForgeThreads {
+  // The first comment of an inline thread (GitHub: root comment id; GitLab:
+  // discussion id), or null when it no longer exists.
+  getThreadRoot(target: ThreadTarget, threadId: string): Promise<ThreadRoot | null>;
+  // Posts a reply in an inline thread and returns the new comment's id.
+  replyToThread(target: ThreadTarget, threadId: string, body: string): Promise<string>;
+  // Whether a forge login is Sentryward itself, so its own comments never
+  // count as a person's reply.
+  isSelfLogin(login: string | undefined): boolean;
 }

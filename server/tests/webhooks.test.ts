@@ -411,3 +411,148 @@ describe("POST /api/webhooks/gitlab/:repoId", () => {
     expect((await sendGitlab(repo.id, "Note Hook", noteEvent)).body.outcome).toBe("not_allowed");
   });
 });
+
+describe("replies on inline threads", () => {
+  const FP = "0123456789abcdef";
+  const installationToken = {
+    method: "POST",
+    url: /\/app\/installations\/55\/access_tokens$/,
+    body: { token: "inst", expires_at: new Date(Date.now() + 3600_000).toISOString() },
+  };
+  const rootComment = (login = "sentryward-test[bot]", body = `**Bug**\n<!-- sentryward:fp=${FP} -->`) => ({
+    url: /\/repos\/acme\/web\/pulls\/comments\/700$/,
+    body: { id: 700, body, user: { login } },
+  });
+  const replyEvent = (body: string, extra: Record<string, unknown> = {}) => ({
+    action: "created",
+    installation: { id: 55 },
+    repository: { id: 900 },
+    pull_request: { number: 42, head: { sha: "sha1" } },
+    comment: { id: 701, in_reply_to_id: 700, body, author_association: "MEMBER", user: { login: "alice" }, ...extra },
+  });
+
+  it("records an ignore command on a GitHub finding thread", async () => {
+    const repo = await githubRepo();
+    vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
+
+    const res = await sendGithub("pull_request_review_comment", replyEvent("/sentryward ignore intentional legacy API"));
+
+    expect(res.body.outcome).toBe("queued");
+    expect(await prisma.threadReply.findFirst()).toMatchObject({
+      repositoryId: repo.id,
+      number: 42,
+      fingerprint: FP,
+      threadId: "700",
+      commentId: "701",
+      actor: "alice",
+      kind: "ignore",
+      ignoreReason: "intentional",
+      ignoreNote: "legacy API",
+      status: "queued",
+    });
+  });
+
+  it("records a question, and a redelivery only once", async () => {
+    await githubRepo();
+    vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
+
+    expect((await sendGithub("pull_request_review_comment", replyEvent("Why is this a problem?"))).body.outcome).toBe("queued");
+    expect((await sendGithub("pull_request_review_comment", replyEvent("Why is this a problem?"))).body.outcome).toBe("duplicate");
+    expect(await prisma.threadReply.findMany()).toMatchObject([{ kind: "question", ignoreReason: null }]);
+  });
+
+  it("never answers the bot itself, nor a reply carrying its marker", async () => {
+    await githubRepo();
+    const stub = fetchStub([installationToken, rootComment()]);
+    vi.stubGlobal("fetch", stub.fetch);
+
+    const own = replyEvent("Answer", { user: { login: "sentryward-test[bot]" } });
+    expect((await sendGithub("pull_request_review_comment", own)).body.outcome).toBe("ignored");
+    const marked = replyEvent("Answer\n<!-- sentryward:reply -->");
+    expect((await sendGithub("pull_request_review_comment", marked)).body.outcome).toBe("ignored");
+    expect(stub.calls).toHaveLength(0);
+    expect(await prisma.threadReply.count()).toBe(0);
+  });
+
+  it("refuses people without push access and threads Sentryward did not start", async () => {
+    await githubRepo();
+    vi.stubGlobal("fetch", fetchStub([installationToken, rootComment("bob")]).fetch);
+
+    const outsider = replyEvent("/sentryward ignore false-positive", { author_association: "CONTRIBUTOR" });
+    expect((await sendGithub("pull_request_review_comment", outsider)).body.outcome).toBe("not_allowed");
+    expect((await sendGithub("pull_request_review_comment", replyEvent("Hm?"))).body.outcome).toBe("ignored");
+    // A top-level review comment is not a reply.
+    const topLevel = replyEvent("Hm?", { in_reply_to_id: undefined });
+    expect((await sendGithub("pull_request_review_comment", topLevel)).body.outcome).toBe("ignored");
+    expect(await prisma.threadReply.count()).toBe(0);
+  });
+
+  it("stops recording replies on a change past the hourly limit", async () => {
+    const repo = await githubRepo();
+    vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
+    await prisma.threadReply.createMany({
+      data: Array.from({ length: 10 }, (_, i) => ({
+        repositoryId: repo.id,
+        number: 42,
+        fingerprint: FP,
+        threadId: "700",
+        commentId: `old-${i}`,
+        actor: "alice",
+        kind: "question" as const,
+        body: "?",
+      })),
+    });
+
+    expect((await sendGithub("pull_request_review_comment", replyEvent("One more?"))).body.outcome).toBe("rate_limited");
+    // Old replies no longer count.
+    await prisma.threadReply.updateMany({ data: { createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) } });
+    expect((await sendGithub("pull_request_review_comment", replyEvent("One more?"))).body.outcome).toBe("queued");
+  });
+
+  const diffNote = (note: string, username = "alice") => ({
+    object_kind: "note",
+    user: { id: 5, username },
+    object_attributes: { id: 9001, noteable_type: "MergeRequest", type: "DiffNote", discussion_id: "disc1", note },
+    merge_request: { iid: 7, last_commit: { id: "glsha" } },
+  });
+
+  it("records replies on a GitLab diff thread from a developer only", async () => {
+    const repo = await gitlabRepo();
+    let level = 30;
+    vi.stubGlobal(
+      "fetch",
+      fetchStub([
+        {
+          url: /\/projects\/77\/members\/all\/5$/,
+          get body() {
+            return { access_level: level };
+          },
+        },
+        {
+          url: /\/projects\/team%2Fapp\/merge_requests\/7\/discussions\/disc1$/,
+          body: {
+            id: "disc1",
+            notes: [
+              { id: 9000, body: `**Bug**\n<!-- sentryward:fp=${FP} -->`, system: false, author: { username: "bot" } },
+              { id: 9001, body: "/sentryward ignore false-positive", system: false, author: { username: "alice" } },
+            ],
+          },
+        },
+      ]).fetch,
+    );
+
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote("/sentryward ignore false-positive"))).body.outcome).toBe("queued");
+    expect(await prisma.threadReply.findFirst()).toMatchObject({
+      number: 7,
+      threadId: "disc1",
+      commentId: "9001",
+      kind: "ignore",
+      ignoreReason: "false_positive",
+    });
+    // The bot's own notes, including the thread's first, are never replies.
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote("Answer", "bot"))).body.outcome).toBe("ignored");
+    level = 20;
+    await prisma.threadReply.deleteMany();
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote("Why?"))).body.outcome).toBe("not_allowed");
+  });
+});

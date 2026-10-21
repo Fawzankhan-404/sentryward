@@ -171,6 +171,15 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
       </>
     ),
   },
+  replies: {
+    label: "Respond to replies",
+    description: (
+      <>
+        Answer questions in a finding&apos;s thread, and dismiss it on{" "}
+        <code>/sentryward ignore false-positive|intentional</code>.
+      </>
+    ),
+  },
   abortOnClose: {
     label: "Abort on close",
     description: "Abort the in-progress review if the PR is closed or merged.",
@@ -1145,7 +1154,7 @@ export function ConfigFields(props: {
           </div>
           <ToggleList>{toggles(["reviewOnPush"])}</ToggleList>
           <ToggleList>{toggles(["fullReviewOnPush"], !reviewOnPushOn)}</ToggleList>
-          <ToggleList>{toggles(["command", "abortOnClose"])}</ToggleList>
+          <ToggleList>{toggles(["command", "replies", "abortOnClose"])}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section

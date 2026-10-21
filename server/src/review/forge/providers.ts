@@ -5,8 +5,8 @@ import type { ForgeProvider } from "../core/models.ts";
 // services/providers. Adding a forge:
 //   1. Add it to ForgeProvider in prisma/schema.prisma (with a migration) and
 //      to forgeProviderSchema in review/core/models.ts.
-//   2. Write review/forge/<name>.ts implementing ForgeAdapter, ForgePublisher
-//      and ForgeHooks.
+//   2. Write review/forge/<name>.ts implementing ForgeAdapter, ForgePublisher,
+//      ForgeHooks and ForgeThreads.
 //   3. Add an entry here and in services/providers/index.ts; both are keyed by
 //      ForgeProvider, so the compiler points at whatever is missing.
 //   4. Add the client entry in client/src/features/forge/providers.tsx.

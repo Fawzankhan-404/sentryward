@@ -25,11 +25,14 @@ import {
   type ForgeAdapter,
   type ForgeHooks,
   type ForgePublisher,
+  type ForgeThreads,
   type ForgeRepo,
   type HookTarget,
   type InlineComment,
   type InlineResult,
   type ThreadResult,
+  type ThreadRoot,
+  type ThreadTarget,
 } from "./types.ts";
 
 export interface GitLabAdapterOptions {
@@ -176,7 +179,7 @@ const GITLAB_STATE: Record<CommitState, string> = {
   error: "failed",
 };
 
-export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
+export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks, ForgeThreads {
   readonly provider = "gitlab" as const;
   readonly host: string;
   private http: ForgeHttp;
@@ -428,7 +431,35 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   }
 
   private isSelf(note: GlNote): boolean {
-    return !note.system && Boolean(this.selfLogin) && note.author.username === this.selfLogin;
+    return !note.system && this.isSelfLogin(note.author.username);
+  }
+
+  isSelfLogin(login: string | undefined): boolean {
+    return Boolean(this.selfLogin) && login === this.selfLogin;
+  }
+
+  private discussion(target: ThreadTarget, threadId: string): string {
+    return `${this.project(target.project)}/merge_requests/${target.number}/discussions/${encodeURIComponent(threadId)}`;
+  }
+
+  async getThreadRoot(target: ThreadTarget, threadId: string): Promise<ThreadRoot | null> {
+    try {
+      const discussion = await this.http.json<GlDiscussion>(this.discussion(target, threadId));
+      const first = discussion.notes[0];
+      if (!first) return null;
+      return { ownedBySelf: this.isSelf(first), fingerprint: markersIn(first.body)[0] ?? null };
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  async replyToThread(target: ThreadTarget, threadId: string, body: string): Promise<string> {
+    const note = await this.http.json<GlNote>(`${this.discussion(target, threadId)}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+    return String(note.id);
   }
 
   // GitLab has no batch review API, so each finding is its own discussion. A

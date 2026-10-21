@@ -12,7 +12,6 @@ import { searchTerms } from "../review/forge/issues.ts";
 import {
   abortableGenerate,
   createGenerate,
-  missingKeys,
   modelChain,
   type ApiKeys,
   type Endpoint,
@@ -26,8 +25,9 @@ import { pendingStatus } from "../review/publish/status.ts";
 import { summarize } from "../review/render/json.ts";
 import { progressMarkdown } from "../review/render/progress.ts";
 import { adapterForConnection, type Forge } from "../services/forge.ts";
-import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
+import { llmCredentialsFor } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
+import { resolveLlm, type LlmCredentials } from "./llmEndpoint.ts";
 import { incrementFor } from "./incremental.ts";
 import { claimState, CLOSED_REASON, complete } from "./queue.ts";
 import { findingTransitions, syncFindings, threadOperations, type ThreadOutcome } from "./syncFindings.ts";
@@ -39,9 +39,7 @@ const MAX_REJECTED_FINDINGS = 20;
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
   generateFor: (keys: ApiKeys, endpoint?: Endpoint, baseUrls?: ProviderBaseUrls) => Generate;
-  credentialsFor: (
-    workspaceId: string,
-  ) => Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }>;
+  credentialsFor: (workspaceId: string) => Promise<LlmCredentials>;
   // Absent means every read goes to the forge, as with review.disableCache.
   cache?: ForgeCache;
   closeCheckIntervalMs?: number;
@@ -191,46 +189,9 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   if (config.review.verify !== "off") primary.push(modelChain(config.llm, "verify")[0]);
   const models = [...new Set(primary)];
 
-  const { keys, baseUrls, connections } = await deps.credentialsFor(repo.connection.workspaceId);
-  const { connection, baseUrl, endpointKey } = config.llm;
-  let endpoint: Endpoint | undefined;
-  if (connection) {
-    const selected = connections[connection];
-    if (!selected) {
-      throw new Error(`The selected ${connection} LLM connection no longer exists: configure it in settings`);
-    }
-    if (selected.baseUrl) {
-      endpoint = { baseUrl: selected.baseUrl, apiKey: selected.apiKey };
-    } else {
-      const incompatible = [...models, ...config.llm.fallbackModels].find(
-        (model) => model.split("/")[0] !== connection,
-      );
-      if (incompatible) {
-        throw new Error(
-          `The ${connection} LLM connection uses its official API and cannot run model ${incompatible}`,
-        );
-      }
-    }
-  } else if (baseUrl) {
-    // Compatibility for settings saved before connections were referenced live.
-    if (endpointKey && !keys[endpointKey]) {
-      throw new Error(`No API key for ${endpointKey}: store one in settings or configure it on the server`);
-    }
-    endpoint = { baseUrl, apiKey: endpointKey ? keys[endpointKey] : undefined };
-  } else {
-    throw new Error("No LLM connection selected: choose one in Configuration > LLM Config");
-  }
-  const unkeyed = models.find((model) => missingKeys([model], keys, endpoint, baseUrls).length > 0);
-  if (unkeyed) {
-    const provider = unkeyed.split("/")[0];
-    throw new Error(`No API key for ${provider}: store one in settings or configure it on the server`);
-  }
-  const warnings = [...loaded.warnings];
-  const fallbackModels = config.llm.fallbackModels.filter((model) => {
-    const usable = missingKeys([model], keys, endpoint, baseUrls).length === 0;
-    if (!usable) warnings.push(`Fallback model ${model} skipped: no API key for its provider`);
-    return usable;
-  });
+  const credentials = await deps.credentialsFor(repo.connection.workspaceId);
+  const { keys, baseUrls, endpoint, fallbackModels, warnings: llmWarnings } = resolveLlm(config, models, credentials);
+  const warnings = [...loaded.warnings, ...llmWarnings];
 
   const targetUrl = `${env.CLIENT_ORIGIN}/reviews/${job.id}`;
   const ref = changeSet.forgeRef;

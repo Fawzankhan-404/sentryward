@@ -8,12 +8,14 @@ import { ForgeError } from "../../review/forge/http.ts";
 import { githubConnectSchema } from "../../schemas/connections.schema.ts";
 import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import { getGitHubApp, githubConfigured } from "../githubApp.ts";
+import { recordThreadReply } from "../threadReplies.ts";
 import type { HeaderReader, ProviderDefinition, RepoWithConnection, WebhookOutcome } from "./types.ts";
 import { decryptToken } from "./token.ts";
 
 // "synchronize" brings new commits; the rest make a change reviewable.
 const PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
-// Who may ask for a review in a comment: people who can already push.
+// Who may ask for a review in a comment, or act on a finding by replying to
+// it: people who can already push.
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 export interface GitHubPayload {
@@ -22,7 +24,14 @@ export interface GitHubPayload {
   repository?: { id: number };
   pull_request?: { number: number; head: { sha: string } };
   issue?: { number: number; pull_request?: unknown };
-  comment?: { body: string; author_association: string; user?: { login: string } };
+  comment?: {
+    id?: number;
+    body: string;
+    author_association: string;
+    user?: { login: string };
+    // Review comments only: the thread's root comment, set on every reply.
+    in_reply_to_id?: number;
+  };
   sender?: { login: string };
 }
 
@@ -72,13 +81,29 @@ function isReviewCommand(event: string | undefined, payload: GitHubPayload): boo
   );
 }
 
+// A reply in an inline thread. Whether the thread is Sentryward's is only known
+// once its root comment is read.
+function isThreadReply(event: string | undefined, payload: GitHubPayload): boolean {
+  return (
+    event === "pull_request_review_comment" &&
+    payload.action === "created" &&
+    Boolean(payload.pull_request) &&
+    Boolean(payload.comment?.id && payload.comment.in_reply_to_id)
+  );
+}
+
 // Closed covers merged: GitHub sends "closed" with merged set for both.
 function isPullRequestClose(event: string | undefined, payload: GitHubPayload): boolean {
   return event === "pull_request" && payload.action === "closed";
 }
 
 export function isGithubReviewEvent(event: string | undefined, payload: GitHubPayload): boolean {
-  return isPullRequestPush(event, payload) || isPullRequestClose(event, payload) || isReviewCommand(event, payload);
+  return (
+    isPullRequestPush(event, payload) ||
+    isPullRequestClose(event, payload) ||
+    isReviewCommand(event, payload) ||
+    isThreadReply(event, payload)
+  );
 }
 
 // Shared by the app's webhook and per-repository hooks once the repository is
@@ -104,6 +129,20 @@ export async function handleGithubEvent(
       actor: payload.sender?.login,
     });
     return { body: result.queued ? { outcome: "queued", reviewId: result.job.id } : { outcome: result.reason } };
+  }
+
+  if (isThreadReply(event, payload)) {
+    const comment = payload.comment!;
+    return recordThreadReply({
+      repo,
+      forge: adapterFor(repo.connection),
+      number: payload.pull_request!.number,
+      threadId: String(comment.in_reply_to_id),
+      commentId: String(comment.id),
+      actor: comment.user?.login,
+      body: comment.body,
+      allowed: async () => TRUSTED.has(comment.author_association),
+    });
   }
 
   if (!TRUSTED.has(payload.comment!.author_association)) {

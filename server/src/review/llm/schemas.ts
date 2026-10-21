@@ -52,6 +52,11 @@ export const verificationOutputSchema = z.object({
 });
 export type VerificationOutput = z.infer<typeof verificationOutputSchema>;
 
+export const threadAnswerOutputSchema = z.object({
+  answer: z.string().describe("The reply to post in the thread, in GitHub-flavoured markdown"),
+});
+export type ThreadAnswerOutput = z.infer<typeof threadAnswerOutputSchema>;
+
 export const walkthroughOutputSchema = z.object({
   overview: z.string().describe("Two to five sentences on what the change does and why"),
   fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
@@ -218,6 +223,11 @@ export function repairWalkthroughOutput(raw: unknown): unknown {
 
 // An unreadable verdict is left for the schema to reject: the call then
 // counts as failed and the finding is kept unverified, never guessed at.
+export function repairThreadAnswerOutput(raw: unknown): unknown {
+  const output = camelKeys(record(raw));
+  return { answer: String(output.answer ?? output.reply ?? "") };
+}
+
 export function repairVerificationOutput(raw: unknown): unknown {
   const output = camelKeys(record(raw));
   return {

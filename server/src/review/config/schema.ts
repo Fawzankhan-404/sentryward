@@ -150,6 +150,9 @@ const triggersShape = {
   summary: z.enum(SUMMARY_TRIGGERS),
   // Allow "/sentryward review" in a comment to request a review.
   command: z.boolean(),
+  // Act on replies to Sentryward's inline comments: "/sentryward ignore"
+  // commands, and an answer to anything else.
+  replies: z.boolean(),
   // Stop a review in progress once its PR/MR is closed or merged.
   abortOnClose: z.boolean(),
   ignoreTitles: skipList,
@@ -258,6 +261,7 @@ export const DEFAULT_CONFIG: Config = {
     drafts: false,
     summary: "published",
     command: true,
+    replies: true,
     abortOnClose: true,
     ignoreTitles: [],
     skipAuthors: [],
