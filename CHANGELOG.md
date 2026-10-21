@@ -10,6 +10,11 @@ While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ### Added
 
+- Review details show a Validation card with how many candidate findings were
+  left out of the review, by reason (low confidence, duplicate, outside
+  changed lines, ...), and how many were downgraded because evidence was
+  missing or unverified. Only counts are shown, never the discarded findings,
+  and the card is hidden when nothing was filtered or downgraded.
 - Replies on Sentryward's inline comments get a response in the thread.
   `/sentryward ignore false-positive|intentional [note]` ignores the finding
   with that reason and note, as the dashboard does, and is acknowledged; any

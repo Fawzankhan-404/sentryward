@@ -375,6 +375,56 @@ describe("Review detail page", () => {
     expect(within(sidebar).getByText("abcdef1")).toBeInTheDocument()
   })
 
+  it("counts filtered and demoted findings in the sidebar", async () => {
+    const validation = { dropped: { duplicate: 1, low_confidence: 2, off_diff: 0 }, demoted: 1 }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, validation } } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const sidebar = await screen.findByRole("complementary", { name: "Review details" })
+    expect(within(sidebar).getByText("Validation")).toBeInTheDocument()
+    expect(within(sidebar).getByText("Left out of the review")).toBeInTheDocument()
+    expect(within(sidebar).getByText("Low confidence").closest("div")).toHaveTextContent(/^Low confidence\s*2$/)
+    expect(within(sidebar).getByText("Duplicate").closest("div")).toHaveTextContent(/^Duplicate\s*1$/)
+    expect(within(sidebar).queryByText("Outside changed lines")).not.toBeInTheDocument()
+    expect(
+      within(sidebar).getByText("1 finding downgraded because evidence was missing or unverified"),
+    ).toBeInTheDocument()
+    expect(within(sidebar).getByText("A downgraded finding can also be counted above.")).toBeInTheDocument()
+  })
+
+  it("shows only the downgrade line when nothing was dropped", async () => {
+    const validation = { dropped: { low_confidence: 0 }, demoted: 2 }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, validation } } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const sidebar = await screen.findByRole("complementary", { name: "Review details" })
+    expect(
+      within(sidebar).getByText("2 findings downgraded because evidence was missing or unverified"),
+    ).toBeInTheDocument()
+    expect(within(sidebar).queryByText("Left out of the review")).not.toBeInTheDocument()
+    expect(within(sidebar).queryByText(/can also be counted above/)).not.toBeInTheDocument()
+  })
+
+  it("hides the validation summary when nothing was filtered or demoted", async () => {
+    const validation = { dropped: { low_confidence: 0 }, demoted: 0 }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, validation } } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const sidebar = await screen.findByRole("complementary", { name: "Review details" })
+    expect(within(sidebar).getByText("Coverage")).toBeInTheDocument()
+    expect(within(sidebar).queryByText("Validation")).not.toBeInTheDocument()
+  })
+
+  it("names an unfamiliar drop reason readably", async () => {
+    const validation = { dropped: { some_new_reason: 3 }, demoted: 0 }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, validation } } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const sidebar = await screen.findByRole("complementary", { name: "Review details" })
+    expect(within(sidebar).getByText("Some new reason").closest("div")).toHaveTextContent(/^Some new reason\s*3$/)
+    expect(within(sidebar).queryByText(/downgraded/)).not.toBeInTheDocument()
+  })
+
   it("starts nitpicks collapsed and expands them on demand", async () => {
     mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
     renderWithProviders(<App />, { route: `/reviews/${detail.id}` })

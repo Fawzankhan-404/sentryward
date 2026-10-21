@@ -8,7 +8,7 @@ import { copyToClipboard } from "@/lib/clipboard"
 import { formatDuration, timeAgo } from "@/lib/time"
 import { TriggerIcon } from "../badges"
 import { TRIGGER_LABEL } from "../options"
-import type { Publication, ReviewDetail, ReviewResult } from "../types"
+import type { DropReason, Publication, ReviewDetail, ReviewResult } from "../types"
 
 const OMISSION_TEXT: Record<string, string> = {
   ignored: "ignored by configuration",
@@ -18,6 +18,28 @@ const OMISSION_TEXT: Record<string, string> = {
   too_large: "too large for one review pass",
   budget: "review pass limit reached",
   chunk_failed: "review pass failed",
+}
+
+const DROP_REASON_TEXT: Record<DropReason, string> = {
+  invalid_line: "Invalid line number",
+  unknown_file: "File not in the change",
+  category: "Category not enabled",
+  off_diff: "Outside changed lines",
+  low_confidence: "Low confidence",
+  below_floor: "Below the severity floor",
+  empty: "Empty finding",
+  duplicate: "Duplicate",
+  over_limit: "Over the findings limit",
+  previously_ignored: "Previously ignored on this change",
+  refuted: "Refuted by verification",
+}
+
+// A reason added on the server before the client knows it still reads as text.
+function dropReasonText(reason: string) {
+  // hasOwn, so a reason like "toString" is not read off the prototype.
+  if (Object.hasOwn(DROP_REASON_TEXT, reason)) return DROP_REASON_TEXT[reason as DropReason]
+  const words = reason.replace(/_/g, " ").trim()
+  return words ? words[0].toUpperCase() + words.slice(1) : reason
 }
 
 function plural(count: number, word: string) {
@@ -146,6 +168,40 @@ function CoverageCard({ result }: { result: ReviewResult }) {
   )
 }
 
+// Counts only: what was filtered or downgraded, never the discarded text.
+function ValidationCard({ result }: { result: ReviewResult }) {
+  const { dropped, demoted } = result.validation
+  const drops = Object.entries(dropped)
+    .filter(([, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+  if (drops.length === 0 && demoted === 0) return null
+  return (
+    <SideCard title="Validation">
+      {drops.length > 0 && (
+        <>
+          <p className="text-muted-foreground">Left out of the review</p>
+          <dl className="flex flex-col gap-1.5">
+            {drops.map(([reason, count]) => (
+              // Not Row: its label never shrinks, so a long reason would hide the count.
+              <div key={reason} className="flex items-baseline justify-between gap-3">
+                <dt className="min-w-0 break-words text-muted-foreground">{dropReasonText(reason)}</dt>
+                <dd className="shrink-0 tabular-nums">{count}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+      {demoted > 0 && (
+        <>
+          <p>{plural(demoted, "finding")} downgraded because evidence was missing or unverified</p>
+          {/* The server counts a demotion before later drops (below floor, duplicate, ...). */}
+          {drops.length > 0 && <p className="text-muted-foreground">A downgraded finding can also be counted above.</p>}
+        </>
+      )}
+    </SideCard>
+  )
+}
+
 function UsageCard({ result }: { result: ReviewResult }) {
   const { usageTotals, usage } = result
   return (
@@ -184,6 +240,7 @@ export function ReviewSidebar({ review, result }: { review: ReviewDetail; result
       <ChangeCard review={review} result={result} />
       {review.publication && <PublicationCard publication={review.publication} forge={forge} />}
       {result && <CoverageCard result={result} />}
+      {result && <ValidationCard result={result} />}
       {result && <UsageCard result={result} />}
     </aside>
   )
