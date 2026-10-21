@@ -54,30 +54,26 @@ Adding one can exceed the safe integer range.
 </details>
 
 <details>
-<summary>🤖 Prompt for all review comments with AI agents</summary>
+<summary>🤖 Prompt for AI agents (4 findings)</summary>
 
 ```
-Verify each finding against the current code and only fix it if it still applies.
+Verify each finding against the current code and only fix it if it still applies. Ordered by severity, most severe first.
 
-1. In src/app.ts around line 11: SQL built from @​input
+1. [critical] src/app.ts:11 - SQL built from @​input
+Adding one can exceed the safe integer range.
+Suggested replacement:
+----
+db.query(sql, [b]);
+----
 
-   Adding one can exceed the safe integer range.
+2. [major] src/app.ts:40 - Caller ignores <result>
+Adding one can exceed the safe integer range.
 
-   Suggested replacement for those lines:
+3. [minor] src/app.ts:12 - c is never negative
+Adding one can exceed the safe integer range.
 
-   db.query(sql, [b]);
-
-2. In src/app.ts around line 12: c is never negative
-
-   Adding one can exceed the safe integer range.
-
-3. In src/app.ts around line 12: Name c more clearly
-
-   Adding one can exceed the safe integer range.
-
-4. In src/app.ts around line 40: Caller ignores <result>
-
-   Adding one can exceed the safe integer range.
+4. [minor] src/app.ts:12 - Name c more clearly
+Adding one can exceed the safe integer range.
 ```
 
 </details>

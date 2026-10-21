@@ -336,7 +336,7 @@ export function toMarkdown(
   lines.push(...incrementalNote(result));
   lines.push(...bucketSections(result));
   if (options.agentPrompt !== false && result.findings.length) {
-    lines.push("", ...agentPromptBlock("Prompt for all review comments with AI agents", allFindingsPrompt(result.findings)));
+    lines.push("", ...agentPromptBlock(`Prompt for AI agents (${plural(result.findings.length, "finding")})`, allFindingsPrompt(result.findings)));
   }
   lines.push(...coverageSection(result));
   if (options.stats !== false) lines.push("", footer(result));

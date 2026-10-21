@@ -1,9 +1,12 @@
-import type { Finding } from "./types"
+import { SEVERITIES, type Finding } from "./types"
 
 // Same text as the prompts in the forge comment (server/src/review/render/agentPrompt.ts),
 // so copying from the dashboard and from the PR gives the agent the same thing. Keep the
 // two in sync. The server also escapes forge mentions; a clipboard paste needs none of that.
 const VERIFY = "Verify this against the current code first; it may already be fixed."
+
+// Marks where suggested code starts and ends, so it stays apart from the prose.
+const CODE_DELIMITER = "----"
 
 function lines(finding: Finding) {
   return finding.startLine === finding.endLine
@@ -11,9 +14,18 @@ function lines(finding: Finding) {
     : `lines ${finding.startLine}-${finding.endLine}`
 }
 
+function location(finding: Finding) {
+  const range = finding.startLine === finding.endLine ? `${finding.startLine}` : `${finding.startLine}-${finding.endLine}`
+  return `${finding.file}:${range}`
+}
+
+function suggestion(finding: Finding) {
+  return (finding.suggestion ?? "").replace(/\n$/, "")
+}
+
 function describe(finding: Finding) {
   const parts = [`In ${finding.file} around ${lines(finding)}: ${finding.title.trim()}`, "", finding.body.trim()]
-  if (finding.suggestion) parts.push("", "Suggested replacement for those lines:", "", finding.suggestion.replace(/\n$/, ""))
+  if (finding.suggestion) parts.push("", "Suggested replacement for those lines:", "", suggestion(finding))
   return parts
 }
 
@@ -21,13 +33,22 @@ export function findingPrompt(finding: Finding) {
   return [...describe(finding), "", VERIFY].join("\n")
 }
 
+// SEVERITIES runs most severe first, so a lower index sorts earlier.
 export function allFindingsPrompt(findings: Finding[]) {
-  const ordered = [...findings].sort((a, b) => a.file.localeCompare(b.file) || a.startLine - b.startLine)
-  const parts = ["Verify each finding against the current code and only fix it if it still applies.", ""]
+  const ordered = [...findings].sort(
+    (a, b) =>
+      SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) ||
+      a.file.localeCompare(b.file) ||
+      a.startLine - b.startLine,
+  )
+  const parts = [
+    "Verify each finding against the current code and only fix it if it still applies. Ordered by severity, most severe first.",
+    "",
+  ]
   ordered.forEach((finding, index) => {
-    const [first = "", ...rest] = describe(finding)
-    parts.push(`${index + 1}. ${first}`, ...rest.map((line) => (line ? `   ${line}` : "")), "")
+    parts.push(`${index + 1}. [${finding.severity}] ${location(finding)} - ${finding.title.trim()}`, finding.body.trim())
+    if (finding.suggestion) parts.push("Suggested replacement:", CODE_DELIMITER, suggestion(finding), CODE_DELIMITER)
+    parts.push("")
   })
   return parts.join("\n").trimEnd()
 }
-

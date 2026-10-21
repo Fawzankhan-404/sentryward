@@ -172,13 +172,13 @@ describe("finding counts line", () => {
 });
 
 describe("agent prompts", () => {
-  const ALL = "Prompt for all review comments with AI agents";
+  const ALL = "Prompt for AI agents (4 findings)";
 
   it("adds one prompt for every finding to the summary by default", async () => {
     const result = await sampleResult();
     const markdown = toMarkdown(result);
     expect(markdown).toContain(`<summary>🤖 ${ALL}</summary>`);
-    for (const finding of result.findings) expect(markdown).toContain(`In ${finding.file} around`);
+    for (const finding of result.findings) expect(markdown).toContain(`[${finding.severity}] ${finding.file}:`);
     expect(toMarkdown(result, { agentPrompt: false })).not.toContain(ALL);
   });
 
@@ -213,7 +213,16 @@ describe("agent prompts", () => {
     expect(prompt).toContain(`In ${finding.file} around lines 3-5: ${finding.title}`);
     expect(prompt).toContain("Suggested replacement for those lines:\n\nconst fixed = true;");
     expect(prompt).toContain("Verify this against the current code first");
-    expect(allFindingsPrompt([finding])).toMatch(/^Verify each finding.*\n\n1\. In /);
+    expect(allFindingsPrompt([finding])).toMatch(/^Verify each finding.*\n\n1\. \[\w+\] /);
+    expect(allFindingsPrompt([finding])).toContain(
+      `1. [${finding.severity}] ${finding.file}:3-5 - Plain title\n${finding.body.trim()}\nSuggested replacement:\n----\nconst fixed = true;\n----`,
+    );
+  });
+
+  it("orders the summary prompt by severity, then file and line", async () => {
+    const prompt = allFindingsPrompt((await sampleResult()).findings);
+    const order = [...prompt.matchAll(/^\d+\. \[(\w+)\]/gm)].map((match) => match[1]);
+    expect(order).toEqual(["critical", "major", "minor", "minor"]);
   });
 
   it("keeps backslashes and pipes inside one table cell", async () => {
