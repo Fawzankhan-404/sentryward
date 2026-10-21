@@ -56,11 +56,22 @@ const stats: FindingStats = {
 
 const page = (findings: FindingRow[]) => ({ findings, total: findings.length, page: 1, limit: 10 })
 
+const falsePositive: FindingRow = {
+  ...finding,
+  id: "f-9",
+  state: "ignored",
+  title: "Unused import flagged",
+  ignoredAt: "2026-10-05T12:00:00Z",
+  ignoreReason: "false_positive",
+  ignoreNote: "It is used by the decorator.",
+}
+const FP = "GET /api/findings?state=ignored&ignoreReason=false_positive"
+
 describe("Findings page", () => {
-  it("shows the stat cards and open findings with every column", async () => {
+  it("shows the stat cards and findings with every column", async () => {
     mockApi({
       "GET /api/findings/stats": stats,
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
@@ -103,7 +114,8 @@ describe("Findings page", () => {
           model: [{ key: null, found: 16, falsePositives: 6, rate: 38 }],
         },
       },
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
+      [`${FP}&page=1&limit=10`]: page([]),
     })
     renderWithProviders(<App />, { route: "/findings" })
     await userEvent.click(await screen.findByRole("tab", { name: "False positives" }))
@@ -149,13 +161,15 @@ describe("Findings page", () => {
       "GET /api/repos": { repos: [repo("r1", "team/web"), repo("r2", "team/api")] },
       "GET /api/findings/stats": stats,
       "GET /api/findings/stats?repoId=r2": scoped,
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
-      "GET /api/findings?repoId=r2&state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
+      [`GET /api/findings?repoId=r2&state=ignored&ignoreReason=false_positive&page=1&limit=10`]: page([]),
     })
     renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
     await screen.findByRole("table", { name: "False positives by category" })
+    await screen.findByRole("button", { name: "Unused import flagged" })
 
-    // The tab has its own repository picker, since the findings filters are not shown there.
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
     await userEvent.click(await screen.findByRole("combobox", { name: "Repository" }))
     await userEvent.click(screen.getByRole("option", { name: "team/api" }))
 
@@ -170,15 +184,20 @@ describe("Findings page", () => {
       "/configuration?tab=llm&repo=r2",
     )
 
-    // The scope is shared, so the findings list is narrowed to the same repository.
+    // The list below the breakdown follows the same repository.
+    expect(await screen.findByRole("cell", { name: "No false positives match your filters." })).toBeInTheDocument()
+
+    // Each tab keeps its own filters, so the findings list is not narrowed.
     await userEvent.click(screen.getByRole("tab", { name: "Findings" }))
-    expect(await screen.findByRole("button", { name: /Remove Repository filter/i })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "SQL built from input" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Remove Repository filter/i })).toBeNull()
   })
 
   it("keeps the breakdown and the findings list on separate tabs", async () => {
     mockApi({
       "GET /api/findings/stats": stats,
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
@@ -191,63 +210,91 @@ describe("Findings page", () => {
     expect(screen.queryByRole("button", { name: "SQL built from input" })).toBeNull()
     // The cards sit above the tabs, so they stay on both.
     expect(screen.getByRole("region", { name: "Finding stats" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Filters" })).toBeNull()
+    expect(await screen.findByRole("button", { name: "Unused import flagged" })).toBeInTheDocument()
+    expect(screen.getByRole("searchbox", { name: "Search false positives" })).toBeInTheDocument()
+    expect(screen.queryByRole("searchbox", { name: "Search findings" })).toBeNull()
   })
 
   it("keeps the findings filters when switching tabs and back", async () => {
     const resolved = { ...finding, id: "f-2", state: "resolved" as const, title: "Old bug" }
     mockApi({
       "GET /api/findings/stats": stats,
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
       "GET /api/findings?page=1&limit=10": page([finding, resolved]),
+      "GET /api/findings?state=resolved&page=1&limit=10": page([resolved]),
+      [`${FP}&page=1&limit=10`]: page([]),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
     await screen.findByRole("button", { name: "SQL built from input" })
-    await userEvent.click(screen.getByRole("button", { name: /Remove State filter/i }))
-    await screen.findByRole("button", { name: "Old bug" })
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "State" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Resolved" }))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "SQL built from input" })).toBeNull())
 
     await userEvent.click(screen.getByRole("tab", { name: "False positives" }))
     await screen.findByRole("region", { name: "False positive breakdown" })
+    // The false-positive list has filters of its own.
+    expect(screen.queryByRole("button", { name: /Remove State filter/i })).toBeNull()
     await userEvent.click(screen.getByRole("tab", { name: "Findings" }))
 
     expect(await screen.findByRole("button", { name: "Old bug" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Remove State filter/i })).toBeNull()
+    expect(screen.getByRole("button", { name: /Remove State filter/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "SQL built from input" })).toBeNull()
   })
 
   it("shows an empty state on the false positives tab when there are no findings", async () => {
     mockApi({
       "GET /api/findings/stats": { ...stats, found: 0, falsePositives: 0, falsePositiveRate: null },
-      "GET /api/findings?state=open&page=1&limit=10": page([]),
+      "GET /api/findings?page=1&limit=10": page([]),
+      [`${FP}&page=1&limit=10`]: page([]),
     })
     renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
 
     expect(await screen.findByText("No findings yet")).toBeInTheDocument()
     expect(screen.getByText(/nothing to break down/)).toBeInTheDocument()
     expect(screen.queryByRole("region", { name: "False positive breakdown" })).toBeNull()
+    expect(await screen.findByRole("cell", { name: /^No false positives yet/ })).toBeInTheDocument()
   })
 
-  it("lists every state once the state filter is removed", async () => {
+  it("lists findings in every state on first load", async () => {
     const resolved = { ...finding, id: "f-2", state: "resolved" as const, title: "Old bug", author: null }
-    mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
-      "GET /api/findings?page=1&limit=10": page([finding, resolved]),
-    })
+    mockApi({ "GET /api/findings?page=1&limit=10": page([finding, resolved]) })
     renderWithProviders(<App />, { route: "/findings" })
-
-    await screen.findByRole("button", { name: "SQL built from input" })
-    await userEvent.click(screen.getByRole("button", { name: /Remove State filter/i }))
 
     const row = (await screen.findByRole("button", { name: "Old bug" })).closest("tr")!
     expect(within(row).getByText("Resolved")).toBeInTheDocument()
     // A finding from before authors were stored.
     expect(within(row).getByText("-")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Remove State filter/i })).toBeNull()
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    expect(screen.getByRole("combobox", { name: "State" })).toHaveTextContent("All states")
+  })
+
+  it("narrows by state and goes back to every state once the filters are cleared", async () => {
+    const resolved = { ...finding, id: "f-2", state: "resolved" as const, title: "Old bug" }
+    mockApi({
+      "GET /api/findings?page=1&limit=10": page([finding, resolved]),
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "Old bug" })
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "State" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Open" }))
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Old bug" })).toBeNull())
+    expect(screen.getByRole("button", { name: "Remove State filter" })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(await screen.findByRole("button", { name: "Old bug" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove State filter" })).toBeNull()
   })
 
   it("asks why before ignoring a finding from its row menu", async () => {
     let sent: unknown
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
       "PATCH /api/findings/f-1": (init?: RequestInit) => {
         sent = JSON.parse(String(init?.body))
         return jsonResponse(200, { finding: { ...finding, state: "ignored" } })
@@ -283,7 +330,7 @@ describe("Findings page", () => {
   it("leaves the finding alone when the ignore dialog is cancelled", async () => {
     let patched = false
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
       "PATCH /api/findings/f-1": () => {
         patched = true
         return jsonResponse(200, { finding })
@@ -309,8 +356,8 @@ describe("Findings page", () => {
       ignoreNote: "Kept for the legacy importer.",
     }
     mockApi({
-      // The stub answers the default (open) query; the row's own state drives its menu.
-      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      // The row's own state drives its menu.
+      "GET /api/findings?page=1&limit=10": page([ignored]),
       "PATCH /api/findings/f-1": (init?: RequestInit) => {
         sent = JSON.parse(String(init?.body))
         return jsonResponse(200, { finding })
@@ -337,7 +384,7 @@ describe("Findings page", () => {
   it("leaves the finding ignored when the reopen dialog is cancelled", async () => {
     let patched = false
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([{ ...finding, state: "ignored" }]),
+      "GET /api/findings?page=1&limit=10": page([{ ...finding, state: "ignored" }]),
       "PATCH /api/findings/f-1": () => {
         patched = true
         return jsonResponse(200, { finding })
@@ -354,33 +401,36 @@ describe("Findings page", () => {
     expect(patched).toBe(false)
   })
 
-  it("keeps the table and says nothing is open when the default view is empty", async () => {
-    mockApi({ "GET /api/findings?state=open&page=1&limit=10": page([]) })
+  it("keeps the table and says there are no findings yet when nothing is filtered", async () => {
+    mockApi({ "GET /api/findings?page=1&limit=10": page([]) })
     renderWithProviders(<App />, { route: "/findings" })
 
-    const cell = await screen.findByRole("cell", { name: "No open findings." })
+    const cell = await screen.findByRole("cell", { name: /^No findings yet/ })
     expect(cell.closest("table")).toBe(screen.getByRole("table"))
     expect(screen.getByRole("columnheader", { name: "Severity" })).toBeInTheDocument()
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+    expect(screen.queryByText("No open findings.")).toBeNull()
   })
 
-  it("says there are no findings yet once every filter is off", async () => {
+  it("says the filters missed when a state filter finds nothing", async () => {
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([]),
-      "GET /api/findings?page=1&limit=10": page([]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
+      "GET /api/findings?state=resolved&page=1&limit=10": page([]),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
-    await screen.findByRole("cell", { name: "No open findings." })
-    await userEvent.click(screen.getByRole("button", { name: "Remove State filter" }))
+    await screen.findByRole("button", { name: "SQL built from input" })
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "State" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Resolved" }))
 
-    expect(await screen.findByRole("cell", { name: /^No findings yet/ })).toBeInTheDocument()
+    expect(await screen.findByRole("cell", { name: "No findings match your filters." })).toBeInTheDocument()
   })
 
   it("says the filters missed when a search finds nothing", async () => {
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
-      "GET /api/findings?state=open&q=nothing&page=1&limit=10": page([]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
+      "GET /api/findings?q=nothing&page=1&limit=10": page([]),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
@@ -407,11 +457,11 @@ describe("Findings sorting", () => {
       requested.push(url)
       return jsonResponse(200, page([finding]))
     }
-    const base = "GET /api/findings?state=open"
+    const base = "GET /api/findings?"
     mockApi({
-      [`${base}&page=1&limit=10`]: answer("default"),
-      [`${base}&sort=severity&dir=asc&page=1&limit=10`]: answer("asc"),
-      [`${base}&sort=severity&dir=desc&page=1&limit=10`]: answer("desc"),
+      [`${base}page=1&limit=10`]: answer("default"),
+      [`${base}sort=severity&dir=asc&page=1&limit=10`]: answer("asc"),
+      [`${base}sort=severity&dir=desc&page=1&limit=10`]: answer("desc"),
     })
     renderWithProviders(<App />, { route: "/findings" })
 
@@ -431,7 +481,7 @@ describe("Findings sorting", () => {
 describe("Finding details sheet", () => {
   it("opens the finding in a sheet instead of leaving the page", async () => {
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
       "GET /api/findings/f-1": findingDetail,
     })
     renderWithProviders(<App />, { route: "/findings" })
@@ -450,7 +500,7 @@ describe("Finding details sheet", () => {
 
   it("explains when the full text is gone", async () => {
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
       "GET /api/findings/f-1": { finding: { ...finding, lastJobId: null }, detail: null, change: null },
     })
     renderWithProviders(<App />, { route: "/findings" })
@@ -465,7 +515,7 @@ describe("Finding details sheet", () => {
   it("ignores the finding from the sheet", async () => {
     let sent: unknown
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding]),
       "GET /api/findings/f-1": findingDetail,
       "PATCH /api/findings/f-1": (init?: RequestInit) => {
         sent = JSON.parse(String(init?.body))
@@ -495,7 +545,7 @@ describe("Finding details sheet", () => {
       ignoreNote: "Validated upstream.",
     }
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      "GET /api/findings?page=1&limit=10": page([ignored]),
       "GET /api/findings/f-1": { ...findingDetail, finding: ignored },
     })
     renderWithProviders(<App />, { route: "/findings" })
@@ -513,7 +563,7 @@ describe("Finding details sheet", () => {
     let sent: unknown
     const ignored: FindingRow = { ...finding, state: "ignored", ignoreReason: "fix_later" }
     mockApi({
-      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      "GET /api/findings?page=1&limit=10": page([ignored]),
       "GET /api/findings/f-1": { ...findingDetail, finding: ignored },
       "PATCH /api/findings/f-1": (init?: RequestInit) => {
         sent = JSON.parse(String(init?.body))
@@ -530,5 +580,96 @@ describe("Finding details sheet", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Reopen finding" }))
 
     await waitFor(() => expect(sent).toEqual({ state: "open" }))
+  })
+})
+
+describe("False positives list", () => {
+  it("lists findings dismissed as false positives under the breakdown", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
+
+    await screen.findByRole("region", { name: "False positive breakdown" })
+    const row = (await screen.findByRole("button", { name: "Unused import flagged" })).closest("tr")!
+    expect(within(row).getByText("Ignored")).toBeInTheDocument()
+    // Every list here is ignored, so there is no state to pick.
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    expect(screen.queryByRole("combobox", { name: "State" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Severity" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Category" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Type" })).toBeInTheDocument()
+  })
+
+  it("searches and filters, with chips and a clear action", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
+      [`${FP}&q=nothing&page=1&limit=10`]: page([]),
+      [`${FP}&severity=minor&page=1&limit=10`]: page([]),
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
+
+    await screen.findByRole("button", { name: "Unused import flagged" })
+    const search = screen.getByRole("searchbox", { name: "Search false positives" })
+    await userEvent.type(search, "nothing")
+    expect(await screen.findByRole("cell", { name: "No false positives match your filters." })).toBeInTheDocument()
+    await userEvent.clear(search)
+    await screen.findByRole("button", { name: "Unused import flagged" })
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "Severity" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Minor" }))
+    expect(await screen.findByRole("button", { name: "Remove Severity filter" })).toBeInTheDocument()
+    expect(await screen.findByRole("cell", { name: "No false positives match your filters." })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(await screen.findByRole("button", { name: "Unused import flagged" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove Severity filter" })).toBeNull()
+  })
+
+  it("starts over at the first page on a new search", async () => {
+    const requested: string[] = []
+    const answer = (name: string, body: unknown) => () => {
+      requested.push(name)
+      return jsonResponse(200, body)
+    }
+    mockApi({
+      "GET /api/findings/stats": stats,
+      [`${FP}&page=2&limit=10`]: answer("page 2", { findings: [falsePositive], total: 15, page: 2, limit: 10 }),
+      [`${FP}&q=unused&page=1&limit=10`]: answer("search", page([falsePositive])),
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives&fpPage=2" })
+
+    await screen.findByRole("button", { name: "Unused import flagged" })
+    expect(requested).toEqual(["page 2"])
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search false positives" }), "unused")
+    await waitFor(() => expect(requested).toContain("search"))
+  })
+
+  it("falls back to the last page when the page is past the end", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      [`${FP}&page=5&limit=10`]: { findings: [], total: 3, page: 5, limit: 10 },
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives&fpPage=5" })
+
+    expect(await screen.findByRole("button", { name: "Unused import flagged" })).toBeInTheDocument()
+  })
+
+  it("opens a false positive in the sheet, where it can be reopened", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      [`${FP}&page=1&limit=10`]: page([falsePositive]),
+      "GET /api/findings/f-9": { ...findingDetail, finding: falsePositive },
+    })
+    renderWithProviders(<App />, { route: "/findings?tab=false-positives" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Unused import flagged" }))
+    const sheet = await screen.findByRole("dialog", { name: "Unused import flagged" })
+    expect(await within(sheet).findByText("It is used by the decorator.")).toBeInTheDocument()
+    expect(within(sheet).getByRole("button", { name: "Reopen" })).toBeInTheDocument()
   })
 })

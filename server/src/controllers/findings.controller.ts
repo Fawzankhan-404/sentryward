@@ -79,11 +79,12 @@ const OTHER_CATEGORY = "other";
 const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
 
 export async function listFindings(req: Request, res: Response) {
-  const { repoId, state, severity, category, kind, q, sort, dir, page, limit } = listFindingsQuerySchema.parse(req.query);
+  const { repoId, state, ignoreReason, severity, category, kind, q, sort, dir, page, limit } = listFindingsQuerySchema.parse(req.query);
   const where: Prisma.FindingWhereInput = {
     ...ownedBy(req.workspaceId!),
     ...(repoId ? { repositoryId: repoId } : {}),
     ...(state ? { state } : {}),
+    ...(ignoreReason ? { ignoreReason } : {}),
     ...(severity ? { severity } : {}),
     ...(category ? { category } : {}),
     ...(kind ? { kind } : {}),

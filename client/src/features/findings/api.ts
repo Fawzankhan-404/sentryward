@@ -22,6 +22,7 @@ export interface FindingPage {
 export interface FindingQuery {
   repoId?: string
   state?: FindingState
+  ignoreReason?: IgnoreReason
   severity?: Severity
   category?: FindingCategory
   kind?: FindingKind
@@ -36,7 +37,7 @@ export interface FindingQuery {
 // stay predictable.
 function findingSearch(params: FindingQuery) {
   const search = new URLSearchParams()
-  for (const key of ["repoId", "state", "severity", "category", "kind", "q", "sort", "dir", "page", "limit"] as const) {
+  for (const key of ["repoId", "state", "ignoreReason", "severity", "category", "kind", "q", "sort", "dir", "page", "limit"] as const) {
     if (params[key]) search.set(key, String(params[key]))
   }
   return search.toString()

@@ -3,9 +3,12 @@ import { CATEGORIES, KINDS, SEVERITIES } from "../review/core/severity.ts";
 
 export const findingStateSchema = z.enum(["open", "resolved", "ignored"]);
 
+export const ignoreReasonSchema = z.enum(["false_positive", "intentional", "fix_later", "not_specified"]);
+
 export const listFindingsQuerySchema = z.object({
   repoId: z.uuid().optional(),
   state: findingStateSchema.optional(),
+  ignoreReason: ignoreReasonSchema.optional(),
   severity: z.enum(SEVERITIES).optional(),
   category: z.enum(CATEGORIES).optional(),
   kind: z.enum(KINDS).optional(),
@@ -24,8 +27,6 @@ export const findingStatsQuerySchema = z.object({
 });
 
 export const findingIdParamSchema = z.object({ id: z.uuid() });
-
-export const ignoreReasonSchema = z.enum(["false_positive", "intentional", "fix_later", "not_specified"]);
 
 // "resolved" belongs to the worker: only a later run can show a finding is gone.
 export const updateFindingSchema = z.discriminatedUnion("state", [

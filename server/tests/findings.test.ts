@@ -233,6 +233,26 @@ describe("GET /api/findings", () => {
     const res = await request(app).get("/api/findings?state=done").set("Cookie", cookie);
     expect(res.status).toBe(400);
   });
+
+  it("filters by why a finding was ignored", async () => {
+    await sync(base);
+    const [falsePositive, intentional] = await rows();
+    await prisma.finding.update({
+      where: { id: falsePositive!.id },
+      data: { state: "ignored", ignoredAt: new Date(), ignoreReason: "false_positive" },
+    });
+    await prisma.finding.update({
+      where: { id: intentional!.id },
+      data: { state: "ignored", ignoredAt: new Date(), ignoreReason: "intentional" },
+    });
+
+    const res = await request(app).get("/api/findings?state=ignored&ignoreReason=false_positive").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.findings.map((f: { id: string }) => f.id)).toEqual([falsePositive!.id]);
+
+    const unknown = await request(app).get("/api/findings?ignoreReason=wrong").set("Cookie", cookie);
+    expect(unknown.status).toBe(400);
+  });
 });
 
 describe("GET /api/findings sorting", () => {
