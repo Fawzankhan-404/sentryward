@@ -540,6 +540,59 @@ describe("Review detail page", () => {
     expect(writeText.mock.calls[0][0]).toContain("Suggested replacement for those lines:\n\ndb.query(sql, [q])")
   })
 
+  // jsdom has no object URLs and would try to navigate on an anchor click.
+  function stubDownload() {
+    const blobs: Blob[] = []
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob)
+      return "blob:review"
+    })
+    URL.revokeObjectURL = vi.fn()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    return { blobs, click }
+  }
+
+  it("downloads the review markdown as a file", async () => {
+    const markdown = "# Sentryward review\n\n- SQL injection in search\n"
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: detail },
+      [`GET /api/reviews/${detail.id}/markdown`]: () => new Response(markdown, { status: 200 }),
+    })
+    const { blobs, click } = stubDownload()
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Download markdown" }))
+
+    await waitFor(() => expect(click).toHaveBeenCalledOnce())
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(`sentryward-review-${detail.id}.md`)
+    expect(await blobs[0].text()).toBe(markdown)
+    expect(screen.getByRole("button", { name: "Copy markdown" })).toBeEnabled()
+  })
+
+  it("offers no markdown download without a result", async () => {
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: { ...detail, status: "failed", verdict: "error", result: null } },
+    })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    expect(await screen.findByRole("button", { name: "Download markdown" })).toBeDisabled()
+  })
+
+  it("reports a failed markdown download without saving a file", async () => {
+    mockApi({
+      [`GET /api/reviews/${detail.id}`]: { review: detail },
+      [`GET /api/reviews/${detail.id}/markdown`]: () => jsonResponse(500, { message: "boom" }),
+    })
+    const { click } = stubDownload()
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Download markdown" }))
+
+    expect(await screen.findByText("Could not download the markdown")).toBeInTheDocument()
+    expect(click).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Download markdown" })).toBeEnabled()
+  })
+
   it.each([
     ["completed", "No findings. Nothing in this change needs attention."],
     ["partial", "No findings were reported; review coverage was incomplete."],

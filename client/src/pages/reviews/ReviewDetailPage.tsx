@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
-import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, OctagonX, RotateCw } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Bot, Copy, Download, ExternalLink, Loader2, OctagonX, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/PageHeader"
 import { PageShell } from "@/components/PageShell"
@@ -18,6 +18,7 @@ import { WalkthroughCard } from "@/features/reviews/detail/WalkthroughCard"
 import { PROVIDERS } from "@/features/forge/providers"
 import { changeLabel } from "@/features/reviews/links"
 import { copyToClipboard } from "@/lib/clipboard"
+import { downloadText } from "@/lib/download"
 import { isActive, type ReviewResult } from "@/features/reviews/types"
 
 function BackToReviews() {
@@ -63,6 +64,7 @@ export function ReviewDetailPage() {
   const rerun = useRerunReview()
   const cancel = useCancelReview()
   const [cancelling, setCancelling] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   if (isPending) {
     return (
@@ -98,6 +100,19 @@ export function ReviewDetailPage() {
       navigate(`/reviews/${next.id}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start a new review")
+    }
+  }
+
+  async function downloadMarkdown() {
+    setDownloading(true)
+    try {
+      // fetchReviewMarkdown throws on a failed response, so no empty file is saved.
+      const markdown = await fetchReviewMarkdown(review.id)
+      downloadText(markdown, `sentryward-review-${review.id}.md`, "text/markdown;charset=utf-8")
+    } catch {
+      toast.error("Could not download the markdown")
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -146,6 +161,10 @@ export function ReviewDetailPage() {
             >
               <Copy />
               Copy markdown
+            </Button>
+            <Button variant="outline" onClick={downloadMarkdown} disabled={!result || downloading}>
+              {downloading ? <Loader2 className="animate-spin" /> : <Download />}
+              Download markdown
             </Button>
             <Button variant="outline" onClick={runAgain} disabled={rerun.isPending || isActive(review.status)}>
               {rerun.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
