@@ -41,6 +41,17 @@ const stats: FindingStats = {
   falsePositives: 1,
   found: 9,
   falsePositiveRate: 11,
+  falsePositivesBy: {
+    category: [
+      { key: "security", found: 5, falsePositives: 1, rate: 20 },
+      { key: "bug", found: 4, falsePositives: 0, rate: 0 },
+    ],
+    severity: [
+      { key: "critical", found: 5, falsePositives: 1, rate: 20 },
+      { key: "major", found: 4, falsePositives: 0, rate: 0 },
+    ],
+    model: [{ key: "anthropic/claude-sonnet-5-5", found: 9, falsePositives: 1, rate: 11 }],
+  },
 }
 
 const page = (findings: FindingRow[]) => ({ findings, total: findings.length, page: 1, limit: 10 })
@@ -72,6 +83,91 @@ describe("Findings page", () => {
     expect(within(row).getByText("Security")).toBeInTheDocument()
     expect(within(row).getByText("Potential issue")).toBeInTheDocument()
     expect(within(row).getByText("alice")).toBeInTheDocument()
+  })
+
+  it("breaks false positives down, hiding thin rows and hinting at the noisy ones", async () => {
+    mockApi({
+      "GET /api/findings/stats": {
+        ...stats,
+        falsePositivesBy: {
+          category: [
+            { key: "style", found: 8, falsePositives: 4, rate: 50 },
+            { key: "bug", found: 7, falsePositives: 3, rate: 43 },
+            { key: "security", found: 6, falsePositives: 0, rate: 0 },
+            { key: "docs", found: 2, falsePositives: 2, rate: 100 },
+          ],
+          severity: [
+            { key: "major", found: 6, falsePositives: 2, rate: 33 },
+            { key: "minor", found: 10, falsePositives: 4, rate: 40 },
+          ],
+          model: [{ key: null, found: 16, falsePositives: 6, rate: 38 }],
+        },
+      },
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    const byCategory = await screen.findByRole("table", { name: "False positives by category" })
+    const style = within(byCategory).getByText("Style").closest("tr")!
+    expect(within(style).getByText("50%")).toBeInTheDocument()
+    expect(within(style).getByRole("link", { name: "Drop Style from the reviewed categories" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=findings",
+    )
+    expect(within(within(byCategory).getByText("Security").closest("tr")!).queryByRole("link")).toBeNull()
+    // Noise in a category a review exists for points at confidence, not at dropping it.
+    const bug = within(byCategory).getByText("Bug").closest("tr")!
+    expect(within(bug).getByRole("link", { name: "Raise the minimum confidence" })).toBeInTheDocument()
+    expect(within(bug).queryByRole("link", { name: /Drop/ })).toBeNull()
+    // Two findings is too few to call docs noisy, whatever the rate says.
+    expect(within(byCategory).queryByText("Docs")).toBeNull()
+    expect(screen.getByText("1 row with fewer than 5 findings hidden")).toBeInTheDocument()
+
+    // A noisy major gets no settings hint; a noisy minor does.
+    const bySeverity = screen.getByRole("table", { name: "False positives by severity" })
+    expect(within(within(bySeverity).getByText("major").closest("tr")!).queryByRole("link")).toBeNull()
+    expect(within(bySeverity).getByRole("link", { name: "Raise the minimum confidence or severity floor" })).toBeInTheDocument()
+
+    const byModel = screen.getByRole("table", { name: "False positives by model" })
+    expect(within(byModel).getByText("Analyzer or unrecorded")).toBeInTheDocument()
+    expect(within(byModel).queryByRole("link")).toBeNull()
+  })
+
+  it("scopes the breakdown and its hints to the selected repository", async () => {
+    const repo = (id: string, fullPath: string) => ({ id, fullPath, provider: "gitlab", host: "gitlab.com", enabled: true })
+    const scoped: FindingStats = {
+      ...stats,
+      found: 6,
+      falsePositivesBy: {
+        category: [{ key: "style", found: 6, falsePositives: 3, rate: 50 }],
+        severity: [],
+        model: [{ key: "openai/gpt-5", found: 6, falsePositives: 3, rate: 50 }],
+      },
+    }
+    mockApi({
+      "GET /api/repos": { repos: [repo("r1", "team/web"), repo("r2", "team/api")] },
+      "GET /api/findings/stats": stats,
+      "GET /api/findings/stats?repoId=r2": scoped,
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?repoId=r2&state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+    await screen.findByRole("table", { name: "False positives by category" })
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(await screen.findByRole("combobox", { name: "Repository" }))
+    await userEvent.click(screen.getByRole("option", { name: "team/api" }))
+
+    const region = await screen.findByRole("region", { name: "False positive breakdown" })
+    await within(region).findByText(/in team\/api/)
+    expect(within(region).getByRole("link", { name: "Drop Style from the reviewed categories" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=findings&repo=r2",
+    )
+    expect(within(region).getByRole("link", { name: "Try another model" })).toHaveAttribute(
+      "href",
+      "/configuration?tab=llm&repo=r2",
+    )
   })
 
   it("lists every state once the state filter is removed", async () => {
