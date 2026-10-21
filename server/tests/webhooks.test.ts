@@ -232,7 +232,7 @@ describe("POST /api/webhooks/github", () => {
           url: /\/app\/installations\/55\/access_tokens$/,
           body: { token: "inst", expires_at: new Date(Date.now() + 3600_000).toISOString() },
         },
-        { url: /\/repos\/acme\/web\/pulls\/42$/, body: { state: "open", title: "T", head: { sha: "headnow" } } },
+        { url: /\/repos\/acme\/web\/pulls\/42$/, body: { state: "open", title: "T", base: { sha: "basenow", ref: "main" }, head: { sha: "headnow" } } },
       ]).fetch,
     );
 
@@ -430,9 +430,26 @@ describe("replies on inline threads", () => {
     pull_request: { number: 42, head: { sha: "sha1" } },
     comment: { id: 701, in_reply_to_id: 700, body, author_association: "MEMBER", user: { login: "alice" }, ...extra },
   });
+  // A finding on the change, without which no note is looked at.
+  const tracked = (repositoryId: string, number: number) =>
+    prisma.finding.create({
+      data: {
+        repositoryId,
+        number,
+        fingerprint: FP,
+        title: "Bug",
+        file: "src/app.ts",
+        startLine: 1,
+        severity: "major",
+        category: "bug",
+        kind: "issue",
+        changeTitle: "Change",
+      },
+    });
 
   it("records an ignore command on a GitHub finding thread", async () => {
     const repo = await githubRepo();
+    await tracked(repo.id, 42);
     vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
 
     const res = await sendGithub("pull_request_review_comment", replyEvent("/sentryward ignore intentional legacy API"));
@@ -453,7 +470,7 @@ describe("replies on inline threads", () => {
   });
 
   it("records a question, and a redelivery only once", async () => {
-    await githubRepo();
+    await tracked((await githubRepo()).id, 42);
     vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
 
     expect((await sendGithub("pull_request_review_comment", replyEvent("Why is this a problem?"))).body.outcome).toBe("queued");
@@ -462,7 +479,7 @@ describe("replies on inline threads", () => {
   });
 
   it("never answers the bot itself, nor a reply carrying its marker", async () => {
-    await githubRepo();
+    await tracked((await githubRepo()).id, 42);
     const stub = fetchStub([installationToken, rootComment()]);
     vi.stubGlobal("fetch", stub.fetch);
 
@@ -475,7 +492,7 @@ describe("replies on inline threads", () => {
   });
 
   it("refuses people without push access and threads Sentryward did not start", async () => {
-    await githubRepo();
+    await tracked((await githubRepo()).id, 42);
     vi.stubGlobal("fetch", fetchStub([installationToken, rootComment("bob")]).fetch);
 
     const outsider = replyEvent("/sentryward ignore false-positive", { author_association: "CONTRIBUTOR" });
@@ -489,6 +506,7 @@ describe("replies on inline threads", () => {
 
   it("stops recording replies on a change past the hourly limit", async () => {
     const repo = await githubRepo();
+    await tracked(repo.id, 42);
     vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
     await prisma.threadReply.createMany({
       data: Array.from({ length: 10 }, (_, i) => ({
@@ -509,6 +527,61 @@ describe("replies on inline threads", () => {
     expect((await sendGithub("pull_request_review_comment", replyEvent("One more?"))).body.outcome).toBe("queued");
   });
 
+  it("holds the hourly limit under concurrent deliveries", async () => {
+    await tracked((await githubRepo()).id, 42);
+    vi.stubGlobal("fetch", fetchStub([installationToken, rootComment()]).fetch);
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 15 }, (_, i) =>
+        sendGithub("pull_request_review_comment", replyEvent("Why?", { id: 800 + i })).then((res) => res.body.outcome),
+      ),
+    );
+
+    expect(outcomes.filter((o) => o === "queued")).toHaveLength(10);
+    expect(outcomes.filter((o) => o === "rate_limited")).toHaveLength(5);
+  });
+
+  it("looks no further on a change Sentryward raised nothing on", async () => {
+    await githubRepo();
+    const stub = fetchStub([installationToken, rootComment()]);
+    vi.stubGlobal("fetch", stub.fetch);
+
+    expect((await sendGithub("pull_request_review_comment", replyEvent("Why?"))).body.outcome).toBe("ignored");
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("fails the delivery when the forge cannot be reached", async () => {
+    await tracked((await githubRepo()).id, 42);
+    vi.stubGlobal("fetch", fetchStub([installationToken, { ...rootComment(), status: 502 }]).fetch);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    expect((await sendGithub("pull_request_review_comment", replyEvent("Why?"))).status).toBe(503);
+    expect(await prisma.threadReply.count()).toBe(0);
+    error.mockRestore();
+  });
+
+  it("answers the person who connected a token, who shares the bot's login", async () => {
+    const repo = await githubTokenRepo();
+    await tracked(repo.id, 8);
+    vi.stubGlobal(
+      "fetch",
+      fetchStub([{ url: /\/repos\/acme\/api\/pulls\/comments\/700$/, body: { id: 700, body: `<!-- sentryward:fp=${FP} -->`, user: { login: "dev" } } }]).fetch,
+    );
+    const event = {
+      action: "created",
+      repository: { id: 901 },
+      pull_request: { number: 8, head: { sha: "ghsha" } },
+      comment: { id: 701, in_reply_to_id: 700, body: "Why?", author_association: "OWNER", user: { login: "dev" } },
+    };
+
+    const res = await sendGithub("pull_request_review_comment", event, "gh-repo-secret", `/api/webhooks/github/${repo.id}`);
+
+    expect(res.body.outcome).toBe("queued");
+    // Its own answers still carry the marker.
+    const own = { ...event, comment: { ...event.comment, id: 702, body: "Answer\n<!-- sentryward:reply -->" } };
+    expect((await sendGithub("pull_request_review_comment", own, "gh-repo-secret", `/api/webhooks/github/${repo.id}`)).body.outcome).toBe("ignored");
+  });
+
   const diffNote = (note: string, username = "alice") => ({
     object_kind: "note",
     user: { id: 5, username },
@@ -518,6 +591,7 @@ describe("replies on inline threads", () => {
 
   it("records replies on a GitLab diff thread from a developer only", async () => {
     const repo = await gitlabRepo();
+    await tracked(repo.id, 7);
     let level = 30;
     vi.stubGlobal(
       "fetch",
@@ -550,7 +624,12 @@ describe("replies on inline threads", () => {
       ignoreReason: "false_positive",
     });
     // The bot's own notes, including the thread's first, are never replies.
-    expect((await sendGitlab(repo.id, "Note Hook", diffNote("Answer", "bot"))).body.outcome).toBe("ignored");
+    // They are told apart by marker: the connection posts as a person.
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote("Answer\n<!-- sentryward:reply -->", "bot"))).body.outcome).toBe("ignored");
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote(`**Bug**\n<!-- sentryward:fp=${FP} -->`, "bot"))).body.outcome).toBe("ignored");
+    await prisma.threadReply.deleteMany();
+    // The connected person's own reply is answered.
+    expect((await sendGitlab(repo.id, "Note Hook", diffNote("Why?", "bot"))).body.outcome).toBe("queued");
     level = 20;
     await prisma.threadReply.deleteMany();
     expect((await sendGitlab(repo.id, "Note Hook", diffNote("Why?"))).body.outcome).toBe("not_allowed");

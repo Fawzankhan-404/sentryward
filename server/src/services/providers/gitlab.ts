@@ -117,7 +117,8 @@ export const gitlabProvider: ProviderDefinition = {
       }
 
       // A note on a diff thread. The thread's own first note arrives here too;
-      // recordThreadReply drops it because Sentryward wrote it.
+      // recordThreadReply drops it by its marker. Both connection kinds post as
+      // the connected person, so the login cannot tell the bot apart.
       if (
         event === "Note Hook" &&
         attrs.noteable_type === "MergeRequest" &&
@@ -137,6 +138,7 @@ export const gitlabProvider: ProviderDefinition = {
           commentId: String(attrs.id),
           actor: user.username,
           body: attrs.note ?? "",
+          botLogin: false,
           allowed: async () => (await forge.memberAccessLevel(repo.externalId, user.id)) >= DEVELOPER,
         });
       }

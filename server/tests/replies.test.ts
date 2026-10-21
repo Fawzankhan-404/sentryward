@@ -9,7 +9,6 @@ import { executeReply } from "../src/worker/executeReply.ts";
 import { claimNextReply, recoverStaleReplies } from "../src/worker/replyQueue.ts";
 import { runReply, type RunReplyDeps } from "../src/worker/runReply.ts";
 import { syncFindings } from "../src/worker/syncFindings.ts";
-import { makeChangeSet } from "./helpers/changeSet.ts";
 import { fakeModel } from "./helpers/model.ts";
 import { sampleResult } from "./helpers/result.ts";
 
@@ -73,7 +72,11 @@ function deps(answers: Parameters<typeof fakeModel>[0] = {}, settings?: unknown)
   const posted: { threadId: string; body: string }[] = [];
   const reads: string[] = [];
   const forge = {
-    getChange: async () => makeChangeSet(),
+    // The change has moved on since the review that raised the finding.
+    getChangeHead: async () => ({ headSha: "newer", baseSha: "base", title: "T", state: "open", isDraft: false }),
+    getChange: async () => {
+      throw new Error("a reply never needs the whole change");
+    },
     getFileAtRef: async (_p: string, path: string, ref: string) => {
       reads.push(`${ref}:${path}`);
       if (path === ".sentryward.yaml") return settings === undefined ? null : JSON.stringify(settings);
@@ -113,6 +116,17 @@ describe("boundAnswer", () => {
   it("caps the length and defuses commands", () => {
     expect(boundAnswer("x".repeat(MAX_ANSWER_CHARS + 50))).toHaveLength(MAX_ANSWER_CHARS + 1);
     expect(boundAnswer("Run this:\n/sentryward ignore false-positive")).toBe("Run this:\n`/sentryward` ignore false-positive");
+  });
+
+  it("defuses commands in a code block without backticks", () => {
+    expect(boundAnswer("Like so:\n```\n/sentryward review\n```\n/sentryward review")).toBe(
+      "Like so:\n```\n /sentryward review\n```\n`/sentryward` review",
+    );
+  });
+
+  it("closes a code block the cut leaves open", () => {
+    const answer = boundAnswer(`Like so:\n~~~ts\n${"x\n".repeat(MAX_ANSWER_CHARS)}~~~`);
+    expect(answer.endsWith("…\n~~~")).toBe(true);
   });
 });
 
@@ -158,6 +172,7 @@ describe("runReply", () => {
     expect(prompt).toContain("    11 | line 11");
     expect(maxOutputTokens).toBeLessThanOrEqual(600);
     expect(reads).toContain("head:src/app.ts");
+    expect(reads).toContain("base:.sentryward.yaml");
     expect(posted[0]!.body).toMatch(/^Because `b` comes from the request\./);
     expect((await prisma.finding.findFirst({ where: { fingerprint } }))!.state).toBe("open");
   });
@@ -170,6 +185,21 @@ describe("runReply", () => {
 
     expect(posted).toHaveLength(0);
     expect(model.requests).toHaveLength(0);
+    expect(await prisma.threadReply.findUnique({ where: { id: row.id } })).toMatchObject({ status: "skipped" });
+  });
+
+  it("skips a reply queued before the repository was disabled", async () => {
+    const { runDeps, posted } = deps();
+    runDeps.adapterFor = () => {
+      throw new Error("no forge call for a disabled repository");
+    };
+    await prisma.repository.update({ where: { id: repositoryId }, data: { enabled: false } });
+    const row = await reply({ kind: "ignore", ignoreReason: "false_positive", body: "/sentryward ignore false-positive" });
+
+    await runReply(row, runDeps);
+
+    expect(posted).toHaveLength(0);
+    expect((await prisma.finding.findFirst({ where: { fingerprint } }))!.state).toBe("open");
     expect(await prisma.threadReply.findUnique({ where: { id: row.id } })).toMatchObject({ status: "skipped" });
   });
 
@@ -192,6 +222,24 @@ describe("reply queue", () => {
       throw new Error("forge down");
     });
     expect(await prisma.threadReply.findUnique({ where: { id: claimed!.id } })).toMatchObject({ status: "failed", error: "forge down" });
+  });
+
+  it("stops a run that outlives its bound before it posts", async () => {
+    const { runDeps, posted } = deps();
+    const row = await reply();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let late: Promise<void> | undefined;
+
+    await executeReply(row, (r, signal) => {
+      late = held.then(() => runReply(r, runDeps, signal));
+      return late;
+    }, 10);
+    expect(await prisma.threadReply.findUnique({ where: { id: row.id } })).toMatchObject({ status: "failed" });
+
+    release();
+    await expect(late).rejects.toThrow("maximum run time");
+    expect(posted).toHaveLength(0);
   });
 
   it("requeues a reply whose worker went silent", async () => {

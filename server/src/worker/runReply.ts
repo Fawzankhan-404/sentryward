@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import { REPLY_MARKER } from "../review/core/markers.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
-import { createGenerate, modelChain, type ApiKeys, type Endpoint, type Generate, type ProviderBaseUrls } from "../review/llm/providers.ts";
+import { abortableGenerate, createGenerate, modelChain, type ApiKeys, type Endpoint, type Generate, type ProviderBaseUrls } from "../review/llm/providers.ts";
 import { answerThreadQuestion } from "../review/llm/threadAnswer.ts";
 import { BRAND_FOOTER } from "../review/render/markdown.ts";
 import { adapterForConnection, type Forge } from "../services/forge.ts";
@@ -53,8 +53,13 @@ function codeAround(content: string | null, startLine: number, endLine: number):
 // Answers one reply on a finding's thread: an ignore command updates the
 // finding as the dashboard would and acknowledges it; anything else gets one
 // short model answer. Anything thrown fails the reply through the worker, and
-// nothing has been posted.
-export async function runReply(reply: ThreadReply, deps: RunReplyDeps = defaultDeps): Promise<void> {
+// nothing has been posted. Once `signal` aborts (the run outlived its bound and
+// was failed), nothing more is changed or posted.
+export async function runReply(
+  reply: ThreadReply,
+  deps: RunReplyDeps = defaultDeps,
+  signal?: AbortSignal,
+): Promise<void> {
   const repo = await prisma.repository.findUnique({
     where: { id: reply.repositoryId },
     include: { connection: { include: { workspace: { select: { reviewSettings: true } } } } },
@@ -62,15 +67,20 @@ export async function runReply(reply: ThreadReply, deps: RunReplyDeps = defaultD
   if (!repo) {
     throw new Error("The repository is no longer connected");
   }
+  // Queued before the repository was turned off.
+  if (!repo.enabled) {
+    await finishReply(reply.id, { status: "skipped", error: "The repository is disabled" });
+    return;
+  }
   const forge = deps.adapterFor(repo.connection);
   const target = { project: repo.fullPath, number: reply.number };
   // Settings come from the base revision, as for the review that posted the
   // finding, so the change's own commits cannot turn replies on.
-  const changeSet = await forge.getChange(repo.fullPath, reply.number);
+  const head = await forge.getChangeHead(repo.fullPath, reply.number);
   const { config } = await loadReviewConfig({
     adapter: forge,
     project: repo.fullPath,
-    ref: changeSet.forgeRef.baseSha,
+    ref: head.baseSha,
     globalSettings: repo.connection.workspace.reviewSettings,
     repoSettings: repo.settings,
     followGlobal: repo.followGlobal,
@@ -95,6 +105,7 @@ export async function runReply(reply: ThreadReply, deps: RunReplyDeps = defaultD
       text = `That reason was not understood. ${USAGE}`;
     } else {
       // As PATCH /api/findings/:id does (controllers/findings.controller.ts).
+      signal?.throwIfAborted();
       await prisma.finding.update({
         where: { id: finding.id },
         data: {
@@ -113,15 +124,19 @@ export async function runReply(reply: ThreadReply, deps: RunReplyDeps = defaultD
     }
   } else {
     const parsed = finding.lastJob?.result ? reviewResultSchema.safeParse(finding.lastJob.result) : null;
-    const detail = parsed?.success ? parsed.data.findings.find((f) => f.fingerprint === reply.fingerprint) : undefined;
-    if (!detail) {
+    const result = parsed?.success ? parsed.data : undefined;
+    const detail = result?.findings.find((f) => f.fingerprint === reply.fingerprint);
+    if (!result || !detail) {
       text = "The details of this finding are no longer available, so I cannot answer about it.";
     } else {
       const model = modelChain(config.llm, "review")[0]!;
       const credentials = await deps.credentialsFor(repo.connection.workspaceId);
       const llm = resolveLlm(config, [model], credentials);
-      const generate = deps.generateFor(llm.keys, llm.endpoint, llm.baseUrls);
-      const content = await forge.getFileAtRef(repo.fullPath, detail.file, changeSet.forgeRef.headSha);
+      const base = deps.generateFor(llm.keys, llm.endpoint, llm.baseUrls);
+      const generate = signal ? abortableGenerate(base, signal) : base;
+      // At the head the finding was raised on: its lines number that revision,
+      // and the change may have moved on since.
+      const content = await forge.getFileAtRef(repo.fullPath, detail.file, result.change.headSha);
       text = await answerThreadQuestion(
         generate,
         { finding: detail, code: codeAround(content, detail.startLine, detail.endLine), reply: reply.body },
@@ -131,6 +146,7 @@ export async function runReply(reply: ThreadReply, deps: RunReplyDeps = defaultD
     }
   }
 
+  signal?.throwIfAborted();
   const answerCommentId = await forge.replyToThread(target, reply.threadId, withFooter(text));
   await finishReply(reply.id, { status: "done", answerCommentId });
 }

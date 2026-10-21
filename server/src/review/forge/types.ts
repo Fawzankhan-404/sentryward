@@ -12,6 +12,9 @@ export interface ForgeRepo {
 
 export interface ChangeHead {
   headSha: string;
+  // A ref to read the base revision at: GitLab gives only the target branch
+  // until it has computed the MR's diff.
+  baseSha: string;
   title: string;
   state: "open" | "closed" | "merged";
   isDraft: boolean;

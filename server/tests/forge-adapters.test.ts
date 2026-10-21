@@ -94,6 +94,14 @@ describe("GitHubAdapter", () => {
     });
   });
 
+  it("reads a pull request's head and base without its files", async () => {
+    const { adapter: gh, calls } = adapter([
+      { url: /\/pulls\/42$/, body: { title: "t", state: "open", base: { sha: "b", ref: "main" }, head: { sha: "h", ref: "f" } } },
+    ]);
+    expect(await gh.getChangeHead("acme/web", 42)).toEqual({ headSha: "h", baseSha: "b", title: "t", state: "open", isDraft: false });
+    expect(calls).toHaveLength(1);
+  });
+
   it("refuses a pagination link to another host", async () => {
     const { adapter: gh, calls } = adapter([
       { url: /\/pulls\/42$/, body: { title: "t", body: null, base: { sha: "b", ref: "main" }, head: { sha: "h", ref: "f" } } },
@@ -422,6 +430,22 @@ describe("GitLabAdapter", () => {
     const stub = fetchStub(routes);
     return { ...stub, adapter: new GitLabAdapter({ host, token: async () => "glpat", fetch: stub.fetch }) };
   };
+
+  it("reads a merge request's head and base, falling back to its target branch", async () => {
+    let refs: unknown = { base_sha: "b", start_sha: "s", head_sha: "h" };
+    const { adapter: gl } = adapter([
+      {
+        url: /\/merge_requests\/7$/,
+        get body() {
+          return { iid: 7, title: "t", state: "opened", sha: "h", target_branch: "main", diff_refs: refs };
+        },
+      },
+    ]);
+    expect(await gl.getChangeHead("team/app", 7)).toMatchObject({ headSha: "h", baseSha: "b", state: "open" });
+    // Just opened: GitLab has not computed the diff yet.
+    refs = null;
+    expect(await gl.getChangeHead("team/app", 7)).toMatchObject({ headSha: "h", baseSha: "main" });
+  });
 
   it("lists open merge requests by iid", async () => {
     const { adapter: gl, calls } = adapter([

@@ -141,6 +141,7 @@ export async function handleGithubEvent(
       commentId: String(comment.id),
       actor: comment.user?.login,
       body: comment.body,
+      botLogin: repo.connection.kind !== "token",
       allowed: async () => TRUSTED.has(comment.author_association),
     });
   }

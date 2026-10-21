@@ -282,6 +282,7 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks, 
     const merged = pull.merged ?? Boolean(pull.merged_at);
     return {
       headSha: pull.head.sha,
+      baseSha: pull.base.sha,
       title: pull.title,
       state: merged ? "merged" : pull.state,
       isDraft: pull.draft ?? false,

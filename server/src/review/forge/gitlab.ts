@@ -283,6 +283,7 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks, 
     const mr = await this.http.json<GlMergeRequest>(`${this.project(project)}/merge_requests/${number}`);
     return {
       headSha: mr.diff_refs?.head_sha ?? mr.sha,
+      baseSha: mr.diff_refs?.base_sha ?? mr.target_branch,
       title: mr.title,
       state: mr.state === "merged" ? "merged" : mr.state === "closed" ? "closed" : "open",
       isDraft: mr.draft ?? mr.work_in_progress ?? false,

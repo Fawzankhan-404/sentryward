@@ -7,13 +7,34 @@ import { repairThreadAnswerOutput, threadAnswerOutputSchema } from "./schemas.ts
 const ANSWER_OUTPUT_TOKENS = 600;
 export const MAX_ANSWER_CHARS = 1500;
 
-// The answer as it may be posted: cut to length, and with any line that would
-// read as a Sentryward command defused, so a reply can never make the bot
-// command itself.
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+// The answer as it may be posted: cut to length with any code block it cuts
+// open closed again, so the footer and marker after it are not swallowed; and
+// with any line that would read as a Sentryward command defused, so a reply can
+// never make the bot command itself. Commands only count at the start of a
+// line, so inside a code block a leading space defuses one without the stray
+// backticks that would show there.
 export function boundAnswer(text: string): string {
   const trimmed = text.trim();
   const cut = trimmed.length > MAX_ANSWER_CHARS ? `${trimmed.slice(0, MAX_ANSWER_CHARS).trimEnd()}…` : trimmed;
-  return cut.replace(/^(\s*)\/sentryward/gim, "$1`/sentryward`");
+  let fence: string | null = null;
+  const lines: string[] = [];
+  for (const line of cut.split("\n")) {
+    const opener = FENCE.exec(line)?.[1];
+    if (opener) {
+      // A fence closes on the same character, at least as long as it opened.
+      if (fence === null) fence = opener;
+      else if (opener[0] === fence[0] && opener.length >= fence.length) fence = null;
+      lines.push(line);
+    } else if (fence !== null) {
+      lines.push(line.replace(/^\/sentryward/i, " /sentryward"));
+    } else {
+      lines.push(line.replace(/^(\s*)\/sentryward/i, "$1`/sentryward`"));
+    }
+  }
+  if (fence !== null) lines.push(fence);
+  return lines.join("\n");
 }
 
 export async function answerThreadQuestion(
